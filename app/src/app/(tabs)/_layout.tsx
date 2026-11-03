@@ -1,5 +1,6 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { Tabs } from "expo-router";
+import { Link, Tabs } from "expo-router";
+import { Text } from "react-native";
 
 export default function TabsLayout() {
   return (
@@ -9,6 +10,11 @@ export default function TabsLayout() {
         headerTintColor: "#fff",
         headerTitle: "Laparku Menus",
         tabBarActiveTintColor: "#047857",
+        headerRight: () => (
+          <Link href="/about">
+            <Text className="px-4 text-base font-medium text-white">About</Text>
+          </Link>
+        ),
       }}
     >
       <Tabs.Screen

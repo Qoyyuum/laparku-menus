@@ -42,6 +42,7 @@ export default function VenuesScreen() {
       <FilterBar
         filters={filters}
         onChange={(key: FilterKey, value) => setFilters((f) => ({ ...f, [key]: value }))}
+        groups={["area", "venue_type", "halal"]}
       />
       {loading ? <ActivityIndicator color="#047857" /> : null}
       {error ? <Text className="text-sm text-red-600">{error}</Text> : null}

@@ -14,12 +14,9 @@ export default {
       return app.fetch(request, env, ctx);
     }
     // Everything else is the Expo web export served from the ASSETS binding;
-    // fall back to index.html so client-side routes (e.g. /search) resolve.
-    const res = await env.ASSETS.fetch(request);
-    if (res.status === 404 && request.method === "GET") {
-      return env.ASSETS.fetch(new Request(new URL("/index.html", request.url).toString(), request));
-    }
-    return res;
+    // `not_found_handling = "single-page-application"` in wrangler.toml serves
+    // index.html for client-side routes (e.g. /search).
+    return env.ASSETS.fetch(request);
   },
   async queue(
     _batch: MessageBatch<unknown>,

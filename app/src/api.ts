@@ -5,9 +5,17 @@
 // relative path "/api" — correct on web, where the worker serves this app and
 // the API from the same origin. On native builds set the env var to the
 // deployed worker URL before running `expo export` / `expo start`.
+import { Platform } from "react-native";
+
 const API_BASE = (process.env.EXPO_PUBLIC_API_URL ?? "/api").replace(/\/+$/, "");
 
 export async function apiFetch<T = unknown>(path: string, init?: RequestInit): Promise<T> {
+  if (Platform.OS !== "web" && API_BASE.startsWith("/")) {
+    throw new Error(
+      "EXPO_PUBLIC_API_URL is not set — native builds need the deployed worker API URL " +
+        "(e.g. https://<worker>.workers.dev/api).",
+    );
+  }
   const url = `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
   const res = await fetch(url, init);
   if (!res.ok) {

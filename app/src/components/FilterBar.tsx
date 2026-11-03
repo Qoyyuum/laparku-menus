@@ -20,6 +20,8 @@ const GROUPS: Group[] = [
 interface Props {
   filters: Filters;
   onChange: (key: FilterKey, value: string | undefined) => void;
+  // Restrict which chip groups render (e.g. the venues screen has no item_type).
+  groups?: FilterKey[];
 }
 
 function Chip({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
@@ -36,10 +38,11 @@ function Chip({ label, active, onPress }: { label: string; active: boolean; onPr
 }
 
 // Horizontally scrolling filter chips. Tapping an active chip clears it.
-export function FilterBar({ filters, onChange }: Props) {
+export function FilterBar({ filters, onChange, groups }: Props) {
+  const visible = groups ? GROUPS.filter((g) => groups.includes(g.key)) : GROUPS;
   return (
     <View className="gap-2">
-      {GROUPS.map((group) => (
+      {visible.map((group) => (
         <View key={group.key} className="flex-row items-center gap-2">
           <Text className="w-12 text-xs font-semibold uppercase text-neutral-500">{group.label}</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerClassName="gap-2">

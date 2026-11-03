@@ -4,6 +4,7 @@
   "type": "module",
   "private": true,
   "scripts": {
+    "postinstall": "bun scripts/install-app.ts",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "build:web": "bun scripts/build-web.ts",
