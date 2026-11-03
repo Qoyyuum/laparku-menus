@@ -253,6 +253,11 @@ it("GET /api/stats returns public totals (baseline-relative — the test D1 is s
     .insert(venues)
     .values({ name: "Stats Draft", type: "restaurant", area: "Tutong", status: "draft" });
   const sub = await seedSubmission(u.userId, "approved");
+  // Rejected/pending-only submitters are not "contributors" — same live-
+  // content meaning as the contributions leaderboard.
+  const unlucky = await forgeSession("submitter");
+  await seedSubmission(unlucky.userId, "rejected");
+  await seedSubmission(unlucky.userId, "pending_review");
   await db()
     .insert(food_items)
     .values([
@@ -279,7 +284,8 @@ it("GET /api/stats returns public totals (baseline-relative — the test D1 is s
   const after = await get();
   expect(after.venues).toBe(base.venues + 2);
   expect(after.items).toBe(base.items + 3);
-  // `u` is this test's only new distinct contributor (submissions.user_id).
+  // `u` (approved submission) is the only new contributor; `unlucky`'s
+  // rejected/pending rows must not count.
   expect(after.contributors).toBe(base.contributors + 1);
   expect(after.checkins).toBe(base.checkins + 2);
 });
