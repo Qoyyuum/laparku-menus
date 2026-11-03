@@ -29,6 +29,7 @@ export const VENUE_VERIFICATIONS = ["unverified", "verified", "claimed-by-owner"
 export const ITEM_TYPES = ["dish", "product"] as const;
 export const SOURCE_TYPES = ["menu_pdf", "menu_photo", "product_photo", "barcode", "url", "manual_entry"] as const;
 export const SUBMISSION_STATUSES = ["pending", "pending_review", "auto_rejected", "rejected", "approved"] as const;
+export const REVISION_MODES = ["replace", "merge"] as const;
 
 const id = () =>
   text("id")
@@ -155,8 +156,14 @@ export const food_items = sqliteTable(
     off_barcode: text("off_barcode"),
     source_submission_id: text("source_submission_id").references(() => submissions.id),
     // Set to the superseding submission's id when a newer approved menu
-    // replaces this item. `IS NULL` = currently live.
+    // replaces this item. Kept for provenance; `is_current` is the live flag
+    // public queries read (`superseded_by IS NULL` was the v1 proxy for it).
     superseded_by: text("superseded_by"),
+    // The public menu is exactly the rows with is_current = true. Publish
+    // sets it on inserted items and clears it (with status="superseded" +
+    // superseded_by) on items a revision drops. Defaults true so a plain
+    // insert is live, matching the v1 "published + unsuperseded" semantics.
+    is_current: integer("is_current", { mode: "boolean" }).notNull().default(true),
     status: text("status", { enum: ["published", "superseded", "hidden"] }).notNull().default("published"),
     created_at: createdAt(),
     updated_at: updatedAt(),
@@ -165,6 +172,30 @@ export const food_items = sqliteTable(
     index("food_items_venue_idx").on(t.venue_id),
     index("food_items_superseded_idx").on(t.superseded_by),
     index("food_items_source_submission_idx").on(t.source_submission_id),
+  ],
+);
+
+// One row per approved publish: who rewrote the venue's menu, from which
+// submission, and how (replace = v1 wholesale swap; merge = per-item
+// keep/add). This is the audit spine for food_items.is_current flips.
+export const venue_revisions = sqliteTable(
+  "venue_revisions",
+  {
+    id: id(),
+    venue_id: text("venue_id")
+      .notNull()
+      .references(() => venues.id),
+    submission_id: text("submission_id").references(() => submissions.id),
+    // better-auth user id — kept as plain text, no drizzle-level FK, same
+    // convention as submissions.reviewer_id (auth tables live outside the
+    // tracked schema).
+    reviewer_id: text("reviewer_id").notNull(),
+    mode: text("mode", { enum: REVISION_MODES }).notNull(),
+    created_at: createdAt(),
+  },
+  (t) => [
+    index("venue_revisions_venue_idx").on(t.venue_id),
+    index("venue_revisions_submission_idx").on(t.submission_id),
   ],
 );
 
@@ -194,3 +225,6 @@ export type Submitter = typeof submitters.$inferSelect;
 export type NewSubmitter = typeof submitters.$inferInsert;
 export type ItemFlag = typeof item_flags.$inferSelect;
 export type NewItemFlag = typeof item_flags.$inferInsert;
+export type VenueRevision = typeof venue_revisions.$inferSelect;
+export type NewVenueRevision = typeof venue_revisions.$inferInsert;
+export type RevisionMode = (typeof REVISION_MODES)[number];

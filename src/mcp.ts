@@ -130,7 +130,7 @@ export function createMcpServer(env: Env): McpServer {
   server.registerTool(
     "get_venue_items",
     {
-      description: "List the live (published, non-superseded) menu items of one published venue.",
+      description: "List the current (published + is_current) menu items of one published venue.",
       inputSchema: { venue_id: z.string() },
     },
     async ({ venue_id }) => {

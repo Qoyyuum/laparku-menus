@@ -145,8 +145,29 @@ adminApi.get("/images/*", async (c) => {
   });
 });
 
+// GET /api/admin/venues/:id/items — the venue's CURRENT menu (is_current),
+// for the merge picker's keep/drop toggles on the review screen.
+adminApi.get("/venues/:id/items", async (c) => {
+  const db = getDb(c.env);
+  const [venue] = await db
+    .select({ id: venues.id })
+    .from(venues)
+    .where(eq(venues.id, c.req.param("id")))
+    .limit(1);
+  if (!venue) return c.json({ error: "venue not found" }, 404);
+  const items = await db
+    .select()
+    .from(food_items)
+    .where(and(eq(food_items.venue_id, venue.id), eq(food_items.is_current, true)))
+    .orderBy(asc(food_items.name))
+    .limit(500);
+  return c.json({ items });
+});
+
 // POST /api/admin/submissions/:id/approve — publish the reviewer-edited
-// draft. Body: { venue_id?: string; venue?: VenueDraft; items: DraftItem[] }.
+// draft. Body: { venue_id?; venue?; mode?: "replace"|"merge"; items: (
+// {source:"draft", draft_index, ...DraftItem} | {source:"existing", item_id}
+// )[] } — plain DraftItem entries (v1 shape) count as selected drafts.
 adminApi.post("/submissions/:id/approve", async (c) => {
   let body: PublishEdits;
   try {

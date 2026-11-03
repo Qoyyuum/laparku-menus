@@ -32,6 +32,7 @@ export async function seed(env: Env): Promise<SeedResult> {
         price_bnd: 2.0,
         superseded_by: "superseded-fixture",
         status: "superseded",
+        is_current: false,
       },
     ])
     .returning();

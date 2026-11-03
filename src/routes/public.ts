@@ -1,4 +1,4 @@
-import { and, eq, isNull, lte, sql, type SQL } from "drizzle-orm";
+import { and, eq, lte, sql, type SQL } from "drizzle-orm";
 import { Hono } from "hono";
 import { getDb } from "../db/client";
 import { AREAS, food_items, HALAL_STATUSES, ITEM_TYPES, venues, VENUE_TYPES } from "../db/schema";
@@ -80,7 +80,7 @@ export async function listVenueItems(env: Env, venueId: string) {
   return db
     .select()
     .from(food_items)
-    .where(and(eq(food_items.venue_id, venueId), eq(food_items.status, "published"), isNull(food_items.superseded_by)))
+    .where(and(eq(food_items.venue_id, venueId), eq(food_items.status, "published"), eq(food_items.is_current, true)))
     .limit(LIMIT);
 }
 
@@ -106,11 +106,11 @@ export async function searchPublic(env: Env, f: PublicSearchFilters) {
     .where(and(...vConds))
     .limit(LIMIT);
 
-  // Items half: live items (published, not superseded) at published venues,
+  // Items half: current items (published + is_current) at published venues,
   // constrained by the same venue attribute filters plus item-level filters.
   const iConds: SQL[] = [
     eq(food_items.status, "published"),
-    isNull(food_items.superseded_by),
+    eq(food_items.is_current, true),
     ...venueConds({ type: f.venueType, area: f.area, halal: f.halal }),
   ];
   if (f.itemType) iConds.push(eq(food_items.item_type, f.itemType));

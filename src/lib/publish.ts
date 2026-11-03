@@ -1,18 +1,21 @@
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, notInArray, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
 import {
   AREAS,
   food_items,
   HALAL_STATUSES,
   ITEM_TYPES,
+  REVISION_MODES,
   submissions,
   submitters,
   venues,
   VENUE_TYPES,
   type NewFoodItem,
+  type RevisionMode,
   type Submission,
 } from "../db/schema";
 import type { DraftItem } from "./extractor";
+import { clearRevisionsForSubmission, recordRevision } from "./revisions";
 
 // Thrown for caller-facing failures; `status` maps straight onto the HTTP
 // response so routes don't re-derive it.
@@ -38,16 +41,43 @@ export interface VenueDraft {
   halal_status?: string;
 }
 
+// A draft row the reviewer chose to add — the edited fields ride along (the
+// review screen sends the reviewer's corrections, not the raw extraction);
+// draft_index points back at the extraction draft it came from, for
+// provenance in the merge UI.
+export interface DraftItemSelection extends DraftItem {
+  source: "draft";
+  draft_index: number;
+}
+
+// An existing venue item the reviewer chose to keep through a merge.
+export interface ExistingItemSelection {
+  source: "existing";
+  item_id: string;
+}
+
+// A selected publish item. v1 bodies sent plain DraftItem objects (no
+// `source` key) — still accepted, each treated as a selected draft.
+export type PublishItemSelection = DraftItem | DraftItemSelection | ExistingItemSelection;
+
 // POST /api/admin/submissions/:id/approve body.
 export interface PublishEdits {
   venue_id?: string;
   venue?: VenueDraft;
-  items: DraftItem[];
+  // replace = v1 semantics (whole old menu superseded); merge = the
+  // reviewer-selected set becomes the menu. Omitted → replace.
+  mode?: RevisionMode;
+  items: PublishItemSelection[];
 }
 
 export interface PublishResult {
   venue_id: string;
+  revision_id: string;
+  mode: RevisionMode;
+  // New rows inserted from drafts.
   items_published: number;
+  // Existing items kept current through a merge.
+  items_kept: number;
   items_superseded: number;
 }
 
@@ -62,7 +92,32 @@ function oneOf<const T extends readonly string[]>(v: unknown, allowed: T): T[num
 // Reviewer-edited items get a light sanity pass before they become the
 // public menu — the vision model's draft shape is a suggestion, not a
 // guarantee.
-function validateItems(items: unknown): DraftItem[] {
+function validateDraftItem(raw: unknown, i: number): DraftItem {
+  const item = raw as DraftItem;
+  const name = str(item.name);
+  if (!name) throw new PublishError(400, `items[${i}].name is required`);
+  const itemType = oneOf(item.item_type, ITEM_TYPES) ?? "dish";
+  if (item.item_type !== undefined && item.item_type !== null && !oneOf(item.item_type, ITEM_TYPES)) {
+    throw new PublishError(400, `items[${i}].item_type must be one of ${ITEM_TYPES.join(", ")}`);
+  }
+  if (item.price_bnd !== undefined && item.price_bnd !== null) {
+    if (typeof item.price_bnd !== "number" || !Number.isFinite(item.price_bnd) || item.price_bnd < 0) {
+      throw new PublishError(400, `items[${i}].price_bnd must be a non-negative number`);
+    }
+  }
+  return { ...item, name, item_type: itemType };
+}
+
+interface ParsedSelection {
+  drafts: DraftItem[];
+  existingIds: string[];
+}
+
+// Split the approve body's per-item selection into drafts-to-insert and
+// existing-items-to-keep. Entries without a `source` key are v1-style plain
+// draft items. Structural validation only — whether an `existing` id is
+// actually a current item of the venue is checked post-claim against the DB.
+function parseSelection(items: unknown, mode: RevisionMode): ParsedSelection {
   if (!Array.isArray(items)) throw new PublishError(400, "items must be an array");
   // An empty approve would silently supersede every live item (venue_id) or
   // create a permanently-empty published venue (draft). Emptying a menu is
@@ -70,24 +125,36 @@ function validateItems(items: unknown): DraftItem[] {
   if (items.length === 0) {
     throw new PublishError(400, "items must contain at least one item");
   }
-  return items.map((raw, i) => {
+  const drafts: DraftItem[] = [];
+  const existingIds: string[] = [];
+  for (const [i, raw] of items.entries()) {
     if (typeof raw !== "object" || raw === null) {
       throw new PublishError(400, `items[${i}] must be an object`);
     }
-    const item = raw as DraftItem;
-    const name = str(item.name);
-    if (!name) throw new PublishError(400, `items[${i}].name is required`);
-    const itemType = oneOf(item.item_type, ITEM_TYPES) ?? "dish";
-    if (item.item_type !== undefined && item.item_type !== null && !oneOf(item.item_type, ITEM_TYPES)) {
-      throw new PublishError(400, `items[${i}].item_type must be one of ${ITEM_TYPES.join(", ")}`);
+    const entry = raw as Record<string, unknown>;
+    if (entry.source === "existing") {
+      // Keeping an existing item is meaningless under replace — the whole
+      // old menu goes. Almost always a client bug; surface it as one.
+      if (mode !== "merge") {
+        throw new PublishError(400, `items[${i}]: {source:"existing"} requires mode "merge"`);
+      }
+      const itemId = str(entry.item_id);
+      if (!itemId) throw new PublishError(400, `items[${i}].item_id is required`);
+      if (!existingIds.includes(itemId)) existingIds.push(itemId);
+      continue;
     }
-    if (item.price_bnd !== undefined && item.price_bnd !== null) {
-      if (typeof item.price_bnd !== "number" || !Number.isFinite(item.price_bnd) || item.price_bnd < 0) {
-        throw new PublishError(400, `items[${i}].price_bnd must be a non-negative number`);
+    if (entry.source !== undefined && entry.source !== null && entry.source !== "draft") {
+      throw new PublishError(400, `items[${i}].source must be "draft" or "existing"`);
+    }
+    if (entry.source === "draft") {
+      const idx = entry.draft_index;
+      if (typeof idx !== "number" || !Number.isInteger(idx) || idx < 0) {
+        throw new PublishError(400, `items[${i}].draft_index must be a non-negative integer`);
       }
     }
-    return { ...item, name, item_type: itemType };
-  });
+    drafts.push(validateDraftItem(raw, i));
+  }
+  return { drafts, existingIds };
 }
 
 // Resolves the publish target: an existing venue (venue_id) or a new row
@@ -144,16 +211,22 @@ async function loadSubmission(db: Db, submissionId: string): Promise<Submission>
   return sub;
 }
 
-// Approve a pending_review submission: resolve/create the venue, mark the
-// venue's currently-live items superseded by this submission, insert the
-// reviewer-edited items as published, and record the decision. The
-// submission row and superseded items are kept — the item history is the
-// audit trail.
+// Approve a pending_review submission: resolve/create the venue, apply the
+// reviewer's item selection as the venue's new current menu, supersede every
+// current item the selection didn't keep, and record the decision + a
+// venue_revisions row. The submission row and superseded items are kept —
+// the item history is the audit trail.
+//
+// The selected set is exactly what becomes current: merge lets the reviewer
+// name existing items to keep plus draft items to add; replace is the
+// degenerate case (no keeps) and reproduces v1 wholesale-swap behavior.
+// Dropped items are superseded, never deleted.
 //
 // D1 has no interactive transactions, so ordering does the safety work:
 // the row is *claimed* first (pending_review → approved is conditional, so
-// two reviewers can't race a double-publish), then supersede → insert. Any
-// publish failure rolls the claim back to pending_review so a retry works.
+// two reviewers can't race a double-publish), then validate-against-DB →
+// supersede → insert → revision. Any publish failure rolls every step back
+// so a retry works.
 export async function publishSubmission(
   db: Db,
   submissionId: string,
@@ -161,7 +234,11 @@ export async function publishSubmission(
   edits: PublishEdits,
 ): Promise<PublishResult> {
   const sub = await loadSubmission(db, submissionId);
-  const items = validateItems(edits.items);
+  const mode = edits.mode === undefined ? "replace" : oneOf(edits.mode, REVISION_MODES);
+  if (!mode) {
+    throw new PublishError(400, `mode must be one of ${REVISION_MODES.join(", ")}`);
+  }
+  const selection = parseSelection(edits.items, mode);
 
   const claimed = await db
     .update(submissions)
@@ -175,20 +252,40 @@ export async function publishSubmission(
   let venue: { id: string; created: boolean } | undefined;
   try {
     venue = await resolveVenue(db, edits);
+    // TODO(p2-task-6): stub + venue_request linkage — once those tables
+    // land, approving onto a stub venue must clear venues.is_stub and mark
+    // the matching open venue_request fulfilled. venue.id + submissionId
+    // here are the hook point.
 
+    // Every {source:"existing"} selection must name a currently-live item
+    // of THIS venue — otherwise a reviewer could "keep" (or leak) an item
+    // from a different venue, or keep a row that's already dead.
+    if (selection.existingIds.length > 0) {
+      const current = await db
+        .select({ id: food_items.id })
+        .from(food_items)
+        .where(and(eq(food_items.venue_id, venue.id), eq(food_items.is_current, true)));
+      const currentIds = new Set(current.map((i) => i.id));
+      const bad = selection.existingIds.find((id) => !currentIds.has(id));
+      if (bad) {
+        throw new PublishError(400, `items: item ${bad} is not a current item of this venue`);
+      }
+    }
+
+    // Drop the current items the selection didn't keep. Under replace the
+    // keep-set is empty so this supersedes the whole old menu (v1).
+    const supersedeConds = [
+      eq(food_items.venue_id, venue.id),
+      eq(food_items.is_current, true),
+      ...(selection.existingIds.length > 0 ? [notInArray(food_items.id, selection.existingIds)] : []),
+    ];
     const superseded = await db
       .update(food_items)
-      .set({ superseded_by: submissionId, status: "superseded" })
-      .where(
-        and(
-          eq(food_items.venue_id, venue.id),
-          eq(food_items.status, "published"),
-          isNull(food_items.superseded_by),
-        ),
-      )
+      .set({ superseded_by: submissionId, status: "superseded", is_current: false })
+      .where(and(...supersedeConds))
       .returning({ id: food_items.id });
 
-    const rows: NewFoodItem[] = items.map((item) => ({
+    const rows: NewFoodItem[] = selection.drafts.map((item) => ({
       venue_id: venue!.id,
       item_type: item.item_type,
       name: item.name,
@@ -201,8 +298,16 @@ export async function publishSubmission(
       barcode: str(item.barcode) ?? null,
       source_submission_id: submissionId,
       status: "published",
+      is_current: true,
     }));
     if (rows.length > 0) await db.insert(food_items).values(rows);
+
+    const revisionId = await recordRevision(db, {
+      venueId: venue.id,
+      submissionId,
+      reviewerId,
+      mode,
+    });
 
     if (sub.submitter_id) {
       await db
@@ -211,16 +316,26 @@ export async function publishSubmission(
         .where(eq(submitters.id, sub.submitter_id));
     }
 
-    return { venue_id: venue.id, items_published: rows.length, items_superseded: superseded.length };
+    return {
+      venue_id: venue.id,
+      revision_id: revisionId,
+      mode,
+      items_published: rows.length,
+      items_kept: selection.existingIds.length,
+      items_superseded: superseded.length,
+    };
   } catch (e) {
     // Undo everything this call did, newest first — otherwise a retry would
     // leave an empty published venue, pile up duplicate venue rows, and keep
-    // the venue's real menu superseded in the meantime.
+    // the venue's real menu superseded in the meantime. Kept existing items
+    // were never touched (their source_submission_id is an older
+    // submission), so the delete only removes drafts this call inserted.
     await db.delete(food_items).where(eq(food_items.source_submission_id, submissionId));
     await db
       .update(food_items)
-      .set({ superseded_by: null, status: "published" })
+      .set({ superseded_by: null, status: "published", is_current: true })
       .where(eq(food_items.superseded_by, submissionId));
+    await clearRevisionsForSubmission(db, submissionId);
     if (venue?.created) {
       await db.delete(venues).where(eq(venues.id, venue.id));
     }
