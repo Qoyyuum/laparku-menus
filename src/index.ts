@@ -1,11 +1,13 @@
 import { Hono } from "hono";
 import type { Env } from "./env";
 import publicApi from "./routes/public";
+import submissionsApi from "./routes/submissions";
 
 const app = new Hono<{ Bindings: Env }>();
 
 app.get("/api/health", (c) => c.json({ status: "ok" }));
 app.route("/api", publicApi);
+app.route("/api", submissionsApi);
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
