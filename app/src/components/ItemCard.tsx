@@ -60,6 +60,10 @@ export function ItemCard({ item, venue }: Props) {
           <Text className="text-xs text-sky-800">{item.item_type}</Text>
         </View>
       </View>
+
+      {item.contributed_by ? (
+        <Text className="text-xs text-neutral-500">contributed by {item.contributed_by}</Text>
+      ) : null}
     </View>
   );
 }

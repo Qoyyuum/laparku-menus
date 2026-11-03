@@ -289,7 +289,7 @@ it("a mid-publish failure leaves no orphan venue and restores the venue's live m
     publishSubmission(failingInsertDb(), second.id, "test-reviewer", {
       venue_id,
       items: [{ name: "Replacement", price_bnd: 5.0, item_type: "dish" }],
-    }),
+    }, env),
   ).rejects.toThrow("simulated D1 failure");
 
   const [rolledBack] = await db().select().from(submissions).where(eq(submissions.id, second.id));
@@ -312,7 +312,7 @@ it("a mid-publish failure leaves no orphan venue and restores the venue's live m
     publishSubmission(failingInsertDb(), third.id, "test-reviewer", {
       venue: { name: "Orphan Venue", type: "stall", area: "Belait" },
       items: [{ name: "X", item_type: "dish" }],
-    }),
+    }, env),
   ).rejects.toThrow("simulated D1 failure");
   expect(await db().select().from(venues).where(eq(venues.name, "Orphan Venue"))).toHaveLength(0);
   const [thirdRow] = await db().select().from(submissions).where(eq(submissions.id, third.id));

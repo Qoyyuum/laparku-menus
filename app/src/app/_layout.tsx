@@ -19,6 +19,7 @@ export default function RootLayout() {
         <Stack.Screen name="venue/[id]" options={{ title: "Venue" }} />
         <Stack.Screen name="about" options={{ title: "About" }} />
         <Stack.Screen name="leaderboard" options={{ title: "Leaderboards" }} />
+        <Stack.Screen name="profile" options={{ title: "Your profile" }} />
         <Stack.Screen name="coverage" options={{ title: "Coverage" }} />
         <Stack.Screen name="submit" options={{ title: "Submit a menu" }} />
         <Stack.Screen name="admin/index" options={{ title: "Review queue" }} />

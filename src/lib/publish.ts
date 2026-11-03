@@ -15,7 +15,9 @@ import {
   type RevisionMode,
   type Submission,
 } from "../db/schema";
+import type { Env } from "../env";
 import type { DraftItem } from "./extractor";
+import { notifyPublished } from "./notify";
 import { clearRevisionsForSubmission, recordRevision } from "./revisions";
 
 // Thrown for caller-facing failures; `status` maps straight onto the HTTP
@@ -228,11 +230,17 @@ async function loadSubmission(db: Db, submissionId: string): Promise<Submission>
 // two reviewers can't race a double-publish), then validate-against-DB →
 // supersede → insert → revision. Any publish failure rolls every step back
 // so a retry works.
+//
+// `env` is needed post-publish: a successful approve emails the submitter
+// (notifyPublished). The notification runs AFTER the try/catch — the
+// rollback path rethrows, so a rolled-back publish can never send a
+// "your menu is live" email for a menu that isn't.
 export async function publishSubmission(
   db: Db,
   submissionId: string,
   reviewerId: string,
   edits: PublishEdits,
+  env: Env,
 ): Promise<PublishResult> {
   const sub = await loadSubmission(db, submissionId);
   const mode = edits.mode === undefined ? "replace" : oneOf(edits.mode, REVISION_MODES);
@@ -253,6 +261,7 @@ export async function publishSubmission(
   let venue: { id: string; created: boolean } | undefined;
   let prevVerifiedAt: Date | null | undefined;
   let prevStub: boolean | undefined;
+  let result: PublishResult;
   // Open venue_requests this call fulfilled — re-opened by the rollback.
   const fulfilledIds: string[] = [];
   try {
@@ -396,7 +405,7 @@ export async function publishSubmission(
         .where(eq(submitters.id, sub.submitter_id));
     }
 
-    return {
+    result = {
       venue_id: venue.id,
       revision_id: revisionId,
       mode,
@@ -443,6 +452,12 @@ export async function publishSubmission(
       .where(eq(submissions.id, submissionId));
     throw e;
   }
+
+  // Publish committed — exactly one "submission is live" email per approve.
+  // Best-effort (notifyPublished swallows its own failures), awaited so the
+  // send isn't racing the response in a worker that may freeze after it.
+  await notifyPublished(env, sub);
+  return result;
 }
 
 // Reject a pending_review submission with a reviewer-supplied reason

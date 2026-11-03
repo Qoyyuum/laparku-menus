@@ -1,7 +1,7 @@
-import { and, eq, lte, sql, type SQL } from "drizzle-orm";
+import { and, eq, inArray, lte, sql, type SQL } from "drizzle-orm";
 import { Hono } from "hono";
-import { getDb } from "../db/client";
-import { AREAS, food_items, HALAL_STATUSES, ITEM_TYPES, venues, VENUE_TYPES } from "../db/schema";
+import { getDb, type Db } from "../db/client";
+import { AREAS, food_items, HALAL_STATUSES, ITEM_TYPES, venues, VENUE_TYPES, type FoodItem } from "../db/schema";
 import type { Env } from "../env";
 import { staleMonths, withFreshness } from "../lib/freshness";
 
@@ -87,11 +87,50 @@ export async function listVenueItems(env: Env, venueId: string) {
     .limit(1);
   if (!venue) return null;
 
-  return db
+  const items = await db
     .select()
     .from(food_items)
     .where(and(eq(food_items.venue_id, venueId), eq(food_items.status, "published"), eq(food_items.is_current, true)))
     .limit(LIMIT);
+  return withContribCredit(db, items);
+}
+
+// Task 7 (rewards): per-item contributor credit. Each item traces to the
+// submission it was published from via source_submission_id; the
+// submission's user can opt into public credit (user.show_credit) and their
+// display_name then rides the item payload as `contributed_by`. The names
+// resolve in ONE batch query for the whole result set — never a per-item
+// N+1 — keyed by submission id so repeated sources look up once. `user` is
+// the untracked better-auth table, so the join is raw SQL (same convention
+// as leaderboards.ts). Opt-out users, opted-in-but-nameless rows, anonymous
+// (user-less) submissions and items with no source all carry no
+// contributed_by key — an opted-out display_name never leaves the DB.
+async function withContribCredit(
+  db: Db,
+  items: FoodItem[],
+): Promise<(FoodItem & { contributed_by?: string })[]> {
+  const subIds = [
+    ...new Set(items.map((i) => i.source_submission_id).filter((x): x is string => !!x)),
+  ];
+  const credit = new Map<string, string>();
+  // ids ≤ LIMIT (100) today; chunk anyway so a raised LIMIT can't push the
+  // IN clause past D1's ~100 bound-param cap.
+  for (let off = 0; off < subIds.length; off += 90) {
+    const rows = (await db.all(sql`
+      SELECT s.id AS sid, u.display_name AS name
+      FROM submissions AS s
+      JOIN "user" AS u ON u.id = s.user_id
+      WHERE ${inArray(sql`s.id`, subIds.slice(off, off + 90))}
+        AND u.show_credit = 1
+        AND u.display_name IS NOT NULL
+        AND u.display_name <> ''
+    `)) as { sid: string; name: string }[];
+    for (const r of rows) credit.set(String(r.sid), String(r.name));
+  }
+  return items.map((i) => {
+    const name = i.source_submission_id ? credit.get(i.source_submission_id) : undefined;
+    return name ? { ...i, contributed_by: name } : { ...i };
+  });
 }
 
 export interface PublicSearchFilters {
@@ -140,7 +179,10 @@ export async function searchPublic(env: Env, f: PublicSearchFilters) {
     .limit(LIMIT);
 
   const months = staleMonths(env);
-  return { venues: venueRows.map((v) => withFreshness(v, months)), items: itemRows.map((r) => r.item) };
+  return {
+    venues: venueRows.map((v) => withFreshness(v, months)),
+    items: await withContribCredit(db, itemRows.map((r) => r.item)),
+  };
 }
 
 // --- routes ---------------------------------------------------------------
@@ -167,6 +209,26 @@ publicApi.get("/venues", async (c) => {
 
   const rows = await listPublishedVenues(c.env, { type, area, halal, stub, q: c.req.query("q") });
   return c.json({ venues: rows });
+});
+
+// GET /api/stats — public site-wide totals for the about/landing surfaces:
+// published venues, current published items, distinct contributors (users
+// who filed at least one submission) and total check-ins. One round-trip via
+// scalar subselects.
+publicApi.get("/stats", async (c) => {
+  const [row] = (await getDb(c.env).all(sql`
+    SELECT
+      (SELECT count(*) FROM venues WHERE status = 'published') AS venues,
+      (SELECT count(*) FROM food_items WHERE status = 'published' AND is_current = 1) AS items,
+      (SELECT count(DISTINCT user_id) FROM submissions WHERE user_id IS NOT NULL) AS contributors,
+      (SELECT count(*) FROM check_ins) AS checkins
+  `)) as { venues: number; items: number; contributors: number; checkins: number }[];
+  return c.json({
+    venues: Number(row?.venues ?? 0),
+    items: Number(row?.items ?? 0),
+    contributors: Number(row?.contributors ?? 0),
+    checkins: Number(row?.checkins ?? 0),
+  });
 });
 
 publicApi.get("/venues/:id/items", async (c) => {

@@ -8,6 +8,7 @@ import checkinsApi from "./routes/checkins";
 import coverageApi from "./routes/coverage";
 import flagsApi from "./routes/flags";
 import leaderboardsApi from "./routes/leaderboards";
+import meApi from "./routes/me";
 import publicApi from "./routes/public";
 import submissionsApi from "./routes/submissions";
 import verifyApi from "./routes/verify";
@@ -24,6 +25,7 @@ app.route("/api", flagsApi);
 app.route("/api", verifyApi);
 app.route("/api", checkinsApi);
 app.route("/api", leaderboardsApi);
+app.route("/api", meApi);
 app.route("/api", coverageApi);
 app.route("/api/admin", adminApi);
 

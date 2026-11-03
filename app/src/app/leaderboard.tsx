@@ -174,6 +174,23 @@ function OptInCard({ onSaved }: { onSaved: () => void }) {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Prefill with the stored prefs via GET /api/me (Task 7) so the toggles
+  // reflect what's saved rather than always starting blank. Only rendered
+  // when signed in, so the request is authorized.
+  useEffect(() => {
+    let cancelled = false;
+    authedFetch<{ display_name: string | null; show_on_leaderboard: boolean }>("/me")
+      .then((m) => {
+        if (cancelled) return;
+        setName(m.display_name ?? "");
+        setShow(m.show_on_leaderboard);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   async function save() {
     setBusy(true);
     setError(null);

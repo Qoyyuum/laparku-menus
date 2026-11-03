@@ -2,6 +2,7 @@ import { apiKey } from "@better-auth/api-key";
 import { betterAuth } from "better-auth";
 import { admin, magicLink } from "better-auth/plugins";
 import type { Env } from "./env";
+import { sendEmail } from "./lib/notify";
 
 export type Auth = ReturnType<typeof createAuth>;
 
@@ -28,22 +29,12 @@ export function createAuth(env: Env) {
             console.log(`[auth] magic link for ${email}: ${url}`);
             return;
           }
-          const res = await fetch("https://api.resend.com/emails", {
-            method: "POST",
-            headers: {
-              authorization: `Bearer ${env.RESEND_API_KEY}`,
-              "content-type": "application/json",
-            },
-            body: JSON.stringify({
-              from: env.AUTH_EMAIL_FROM || "Laparku <no-reply@laparku.com>",
-              to: email,
-              subject: "Your Laparku sign-in link",
-              html: `<p><a href="${url}">Sign in to Laparku</a></p><p>This link expires shortly and can only be used once.</p>`,
-            }),
-          });
-          if (!res.ok) {
-            throw new Error(`Resend sendMagicLink failed: ${res.status} ${await res.text()}`);
-          }
+          await sendEmail(
+            env,
+            email,
+            "Your Laparku sign-in link",
+            `<p><a href="${url}">Sign in to Laparku</a></p><p>This link expires shortly and can only be used once.</p>`,
+          );
         },
       }),
       // Needed for Task 11's MCP submit_menu (x-api-key auth).

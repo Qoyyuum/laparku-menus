@@ -80,6 +80,9 @@ export interface FoodItem {
   tags: string[];
   nutrition_estimate: NutritionEstimate | null;
   brand: string | null;
+  // Contributor credit (Task 7): the sourcing submitter's display_name —
+  // present only when that user opted in via show_credit; absent otherwise.
+  contributed_by?: string;
 }
 
 export interface SearchResult {
@@ -197,6 +200,28 @@ export interface CoverageArea {
   stubs: number;
   open_requests: number;
   items: number;
+}
+
+// --- Types mirroring the rewards surface (src/routes/me.ts, /api/stats) ---
+
+// GET /api/me — the signed-in caller's own counts plus their opt-in prefs
+// (the same fields PATCH /api/me writes).
+export interface MeProfile {
+  display_name: string | null;
+  show_on_leaderboard: boolean;
+  show_credit: boolean;
+  submissions: number;
+  approved: number;
+  checkins: number;
+  verifications: number;
+}
+
+// GET /api/stats — public site-wide totals.
+export interface StatsResponse {
+  venues: number;
+  items: number;
+  contributors: number;
+  checkins: number;
 }
 
 export function formatBnd(price: number | null): string {

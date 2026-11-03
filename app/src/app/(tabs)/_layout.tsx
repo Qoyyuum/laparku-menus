@@ -18,6 +18,9 @@ export default function TabsLayout() {
             <Link href="/leaderboard">
               <Text className="px-4 text-base font-medium text-white">Boards</Text>
             </Link>
+            <Link href="/profile">
+              <Text className="px-4 text-base font-medium text-white">Profile</Text>
+            </Link>
             <Link href="/about">
               <Text className="px-4 text-base font-medium text-white">About</Text>
             </Link>

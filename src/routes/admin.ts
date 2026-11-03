@@ -200,7 +200,7 @@ adminApi.post("/submissions/:id/approve", async (c) => {
   }
   const reviewer = c.get("user");
   try {
-    const result = await publishSubmission(getDb(c.env), c.req.param("id"), reviewer.id, body);
+    const result = await publishSubmission(getDb(c.env), c.req.param("id"), reviewer.id, body, c.env);
     return c.json({ ok: true, ...result });
   } catch (e) {
     if (e instanceof PublishError) return c.json({ error: e.message }, e.status as 400);
