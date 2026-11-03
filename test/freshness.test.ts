@@ -13,11 +13,14 @@ const MONTH_MS = 30 * 24 * 60 * 60 * 1000;
 // --- fixtures ---------------------------------------------------------------
 
 // A published venue; pass null to model "never verified" (v1-era rows) or a
-// past Date to model an old verification.
+// past Date to model an old verification. last_checkin_at is pinned to now
+// so these fixtures are never "possibly closed" — the check-in liveness
+// signal (Task 4) has its own coverage in checkins.test.ts and would
+// otherwise put every seed on the stale list.
 async function seedVenue(lastVerifiedAt: Date | null = new Date()) {
   const [v] = await db()
     .insert(venues)
-    .values({ name: `Fresh-${crypto.randomUUID().slice(0, 8)}`, type: "restaurant", area: "Brunei-Muara", last_verified_at: lastVerifiedAt })
+    .values({ name: `Fresh-${crypto.randomUUID().slice(0, 8)}`, type: "restaurant", area: "Brunei-Muara", last_verified_at: lastVerifiedAt, last_checkin_at: new Date() })
     .returning();
   return v!;
 }

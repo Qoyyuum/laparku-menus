@@ -12,6 +12,92 @@ const FRESHNESS_LABELS: Record<string, { text: string; className: string }> = {
   stale: { text: "Menu hasn't been verified in a while", className: "text-red-700" },
 };
 
+// "I ate here" → POST /api/venues/:id/checkin. One check-in per user per
+// venue per day (and 20/day overall — a repeat returns 429). Tapping the
+// button opens an optional "was the menu accurate?" prompt; the answer
+// rides along on the same request as `menu_accurate`, which doubles as a
+// verification vote. Session cookie handling is the same as VerifyWidget.
+function CheckInWidget({ venueId }: { venueId: string }) {
+  const { data: session } = authClient.useSession();
+  const [asked, setAsked] = useState(false);
+  const [done, setDone] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function checkin(menuAccurate?: boolean) {
+    setBusy(true);
+    setError(null);
+    try {
+      const headers: Record<string, string> = { "content-type": "application/json" };
+      if (Platform.OS !== "web") {
+        const cookie = await getAuthCookie();
+        if (cookie) headers.cookie = cookie;
+      }
+      const res = await fetch(`${API_BASE}/venues/${venueId}/checkin`, {
+        method: "POST",
+        headers,
+        credentials: "include",
+        body: JSON.stringify(menuAccurate === undefined ? {} : { menu_accurate: menuAccurate }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `check-in failed (${res.status})`);
+      }
+      setDone(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "check-in failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <View className="gap-2 rounded-xl border border-neutral-200 bg-white p-4">
+      {done ? (
+        <Text className="text-sm text-emerald-700">Checked in — thanks for the visit report!</Text>
+      ) : !session ? (
+        <Text className="text-sm text-neutral-500">Sign in to check in here.</Text>
+      ) : !asked ? (
+        <Pressable
+          className="items-center rounded-lg border border-emerald-700 bg-emerald-700 px-4 py-2.5 disabled:opacity-50"
+          disabled={busy}
+          onPress={() => setAsked(true)}
+        >
+          <Text className="text-base font-semibold text-white">📍 I ate here</Text>
+        </Pressable>
+      ) : (
+        <View className="gap-2">
+          <Text className="text-sm font-semibold text-neutral-800">Was the menu accurate?</Text>
+          <View className="flex-row gap-2">
+            <Pressable
+              className="flex-1 items-center rounded-lg border border-emerald-700 bg-emerald-700 px-3 py-2.5 disabled:opacity-50"
+              disabled={busy}
+              onPress={() => checkin(true)}
+            >
+              <Text className="text-sm font-semibold text-white">Yes</Text>
+            </Pressable>
+            <Pressable
+              className="flex-1 items-center rounded-lg border border-neutral-300 bg-white px-3 py-2.5 disabled:opacity-50"
+              disabled={busy}
+              onPress={() => checkin(false)}
+            >
+              <Text className="text-sm font-semibold text-neutral-800">Not quite</Text>
+            </Pressable>
+            <Pressable
+              className="flex-1 items-center rounded-lg px-3 py-2.5 disabled:opacity-50"
+              disabled={busy}
+              onPress={() => checkin()}
+            >
+              <Text className="text-sm font-medium text-neutral-500">Skip</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
+      {error ? <Text className="text-sm text-red-600">{error}</Text> : null}
+    </View>
+  );
+}
+
 // "Is this menu still current?" 👍/👎 → POST /api/venues/:id/verify. Needs a
 // session (one vote per user per venue per day); the cookie reaches the
 // worker via credentials:"include" on web and the expoClient-stored cookie
@@ -129,6 +215,7 @@ export default function VenueScreen() {
         {freshness ? <Text className={`text-xs font-medium ${freshness.className}`}>{freshness.text}</Text> : null}
       </View>
 
+      {params.id ? <CheckInWidget venueId={params.id} /> : null}
       {params.id ? <VerifyWidget venueId={params.id} /> : null}
 
       {loading ? <ActivityIndicator color="#047857" /> : null}

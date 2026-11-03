@@ -96,14 +96,18 @@ export async function recordVerification(
   return { vote: vote!, created };
 }
 
-export type StaleVenue = Venue & { freshness: Freshness; no_votes: number };
+export type StaleVenue = Venue & { freshness: Freshness; no_votes: number; possibly_closed: boolean };
 
 // The admin staleness list: published venues needing reviewer attention.
 // A venue is stale when it was never verified (last_verified_at NULL) or
 // last verified more than STALE_MONTHS ago — OR when STALE_NO_VOTES or
 // more distinct users voted "not accurate" at/after the last verification
 // (a positive verify resets the clock, so older no-votes stop counting).
-// List-only by design: nothing here ever changes venues.status.
+// A venue also surfaces — flagged possibly_closed — when it has had no
+// check-in within the stale window (last_checkin_at NULL or older than
+// STALE_MONTHS): a liveness hint for reviewers deciding whether the venue
+// still exists at all. List-only by design: nothing here ever changes
+// venues.status.
 //
 // Two queries rather than a correlated subquery: drizzle renders column
 // refs inside select-field sql`` fragments unqualified, which silently
@@ -135,10 +139,15 @@ export async function listStaleVenues(db: Db, env: Env): Promise<StaleVenue[]> {
   const noVotes = new Map(voteRows.map((r) => [r.venue_id, Number(r.n)]));
   const flaggedIds = voteRows.filter((r) => Number(r.n) >= threshold).map((r) => r.venue_id);
 
-  // A venue qualifies by age OR by vote pressure. The id list is chunked
-  // because D1 caps a query at ~100 bound params — same discipline as the
-  // batched inArray writes in publish.ts.
-  const staleConds: SQL[] = [or(isNull(venues.last_verified_at), lt(venues.last_verified_at, cutoff))!];
+  // A venue qualifies by age, by vote pressure, or by the check-in
+  // liveness signal. The id list is chunked because D1 caps a query at
+  // ~100 bound params — same discipline as the batched inArray writes in
+  // publish.ts.
+  const staleConds: SQL[] = [
+    or(isNull(venues.last_verified_at), lt(venues.last_verified_at, cutoff))!,
+    // "Possibly closed": nobody has checked in within the stale window.
+    or(isNull(venues.last_checkin_at), lt(venues.last_checkin_at, cutoff))!,
+  ];
   const ID_CHUNK = 90;
   for (let off = 0; off < flaggedIds.length; off += ID_CHUNK) {
     staleConds.push(inArray(venues.id, flaggedIds.slice(off, off + ID_CHUNK)));
@@ -151,5 +160,9 @@ export async function listStaleVenues(db: Db, env: Env): Promise<StaleVenue[]> {
     .orderBy(asc(sql`coalesce(${venues.last_verified_at}, 0)`))
     .limit(LIMIT);
 
-  return rows.map((v) => ({ ...withFreshness(v, months), no_votes: noVotes.get(v.id) ?? 0 }));
+  return rows.map((v) => ({
+    ...withFreshness(v, months),
+    no_votes: noVotes.get(v.id) ?? 0,
+    possibly_closed: v.last_checkin_at == null || v.last_checkin_at.getTime() < cutoff.getTime(),
+  }));
 }

@@ -64,6 +64,10 @@ export const venues = sqliteTable("venues", {
   // ("accurate") verify vote. NULL means never verified — v1-era venues and
   // direct seeds — which reads as fully stale.
   last_verified_at: integer("last_verified_at", { mode: "timestamp_ms" }),
+  // Liveness signal: bumped on every check-in. NULL means never checked
+  // into — read as "possibly closed" on the admin staleness list (a hint
+  // for reviewers, never an automatic status change).
+  last_checkin_at: integer("last_checkin_at", { mode: "timestamp_ms" }),
   created_at: createdAt(),
   updated_at: updatedAt(),
 });
@@ -227,6 +231,31 @@ export const verifications = sqliteTable(
   ],
 );
 
+// One "I ate here" check-in per user per venue per UTC day (and at most 20
+// per user per day — the counted caps live in src/routes/checkins.ts). The
+// day-scoping is enforced by a UNIQUE expression index on date(created_at)
+// in migrations/0002_phase2.sql (hand-added — same convention as
+// verifications_daily_idx). geo_lat/geo_lng are nullable device-supplied
+// coordinates; menu_accurate is an optional "was the menu right?" answer
+// that also writes a verifications row via recordVerification (Task 3
+// semantics). user_id follows the auth convention — plain text, no
+// drizzle-level FK into the untracked "user" table.
+export const check_ins = sqliteTable(
+  "check_ins",
+  {
+    id: id(),
+    venue_id: text("venue_id")
+      .notNull()
+      .references(() => venues.id),
+    user_id: text("user_id").notNull(),
+    geo_lat: real("geo_lat"),
+    geo_lng: real("geo_lng"),
+    menu_accurate: integer("menu_accurate", { mode: "boolean" }),
+    created_at: createdAt(),
+  },
+  (t) => [index("check_ins_venue_idx").on(t.venue_id), index("check_ins_user_idx").on(t.user_id)],
+);
+
 export const item_flags = sqliteTable(
   "item_flags",
   {
@@ -257,4 +286,6 @@ export type VenueRevision = typeof venue_revisions.$inferSelect;
 export type NewVenueRevision = typeof venue_revisions.$inferInsert;
 export type Verification = typeof verifications.$inferSelect;
 export type NewVerification = typeof verifications.$inferInsert;
+export type CheckIn = typeof check_ins.$inferSelect;
+export type NewCheckIn = typeof check_ins.$inferInsert;
 export type RevisionMode = (typeof REVISION_MODES)[number];

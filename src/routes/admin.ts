@@ -147,10 +147,11 @@ adminApi.get("/images/*", async (c) => {
 });
 
 // GET /api/admin/stale — venues whose freshness needs a reviewer's eye:
-// never verified, verified longer than STALE_MONTHS ago, or carrying
+// never verified, verified longer than STALE_MONTHS ago, carrying
 // STALE_NO_VOTES+ distinct "not accurate" votes since the last positive
-// verification. List-only: surfacing here never changes a venue's status —
-// reviewers decide what to do with the flag.
+// verification, or possibly_closed — no check-in within STALE_MONTHS
+// (venues.last_checkin_at NULL or older). List-only: surfacing here never
+// changes a venue's status — reviewers decide what to do with the flag.
 adminApi.get("/stale", async (c) => {
   const rows = await listStaleVenues(getDb(c.env), c.env);
   return c.json({ venues: rows });

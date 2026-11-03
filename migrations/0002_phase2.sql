@@ -46,4 +46,28 @@ CREATE TABLE `verifications` (
 );--> statement-breakpoint
 CREATE INDEX `verifications_venue_idx` ON `verifications` (`venue_id`);--> statement-breakpoint
 CREATE INDEX `verifications_user_idx` ON `verifications` (`user_id`);--> statement-breakpoint
-CREATE UNIQUE INDEX `verifications_daily_idx` ON `verifications` (`venue_id`, `user_id`, date(`created_at` / 1000, 'unixepoch'));
+CREATE UNIQUE INDEX `verifications_daily_idx` ON `verifications` (`venue_id`, `user_id`, date(`created_at` / 1000, 'unixepoch'));--> statement-breakpoint
+
+-- Task 4 (check-ins): `venues.last_checkin_at` bumps on every check-in; the
+-- admin staleness list reads NULL or older-than-STALE_MONTHS as a
+-- "possibly closed" hint for reviewers (never an auto status change).
+-- `check_ins` records "I ate here" visits with optional device geo and an
+-- optional `menu_accurate` answer that also writes a verifications row
+-- (Task 3 semantics). One check-in per user per venue per UTC day is
+-- enforced by the UNIQUE expression index below — same hand-folded
+-- convention as verifications_daily_idx — and the route counts rows to
+-- return 429 rather than rely on the constraint.
+ALTER TABLE `venues` ADD `last_checkin_at` integer;--> statement-breakpoint
+CREATE TABLE `check_ins` (
+	`id` text PRIMARY KEY NOT NULL,
+	`venue_id` text NOT NULL,
+	`user_id` text NOT NULL,
+	`geo_lat` real,
+	`geo_lng` real,
+	`menu_accurate` integer,
+	`created_at` integer NOT NULL,
+	FOREIGN KEY (`venue_id`) REFERENCES `venues`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE INDEX `check_ins_venue_idx` ON `check_ins` (`venue_id`);--> statement-breakpoint
+CREATE INDEX `check_ins_user_idx` ON `check_ins` (`user_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `check_ins_daily_idx` ON `check_ins` (`venue_id`, `user_id`, date(`created_at` / 1000, 'unixepoch'));
