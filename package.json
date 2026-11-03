@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "build:web": "bun scripts/build-web.ts",
+    "pretest": "bun scripts/ensure-web-build.ts",
     "test": "vitest run",
     "typecheck": "bun check"
   },

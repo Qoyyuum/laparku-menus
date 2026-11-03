@@ -10,10 +10,7 @@ dist
 .wrangler
 .dev.vars
 
-# Expo web export builds into app/dist — keep the placeholder dir only
-!app/dist
-app/dist/*
-!app/dist/.gitkeep
+# Expo web export builds into app/dist (build artifact — kept out of git)
 
 # code coverage
 coverage

@@ -24,10 +24,12 @@ queue = "laparku-menus-submissions"
 queue = "laparku-menus-submissions"
 max_retries = 3
 
-# Expo web export output (Task: Expo app). Placeholder dir for now.
+# Expo web export output — the worker serves it for all non-/api paths with an
+# SPA fallback to index.html (see src/index.ts).
 [assets]
 directory = "./app/dist"
 binding = "ASSETS"
+not_found_handling = "single-page-application"
 
 [ai]
 binding = "AI"
