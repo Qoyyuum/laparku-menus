@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { createAuth } from "./auth";
 import type { Env } from "./env";
+import { handleMcpRequest } from "./mcp";
 import { handleQueueBatch, type SubmissionMessage } from "./queue";
 import adminApi from "./routes/admin";
 import flagsApi from "./routes/flags";
@@ -23,6 +24,11 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === "/api" || url.pathname.startsWith("/api/")) {
       return app.fetch(request, env, ctx);
+    }
+    // MCP endpoint (Task 11) — Streamable HTTP transport, stateless. POST is
+    // the only useful method; the transport answers GET/DELETE correctly.
+    if (url.pathname === "/mcp") {
+      return handleMcpRequest(request, env);
     }
     // Everything else is the Expo web export served from the ASSETS binding;
     // `not_found_handling = "single-page-application"` in wrangler.toml serves

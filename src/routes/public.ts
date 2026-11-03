@@ -47,72 +47,59 @@ function venueConds(f: VenueFilters): SQL[] {
   return conds;
 }
 
-const publicApi = new Hono<{ Bindings: Env }>();
+// --- shared query helpers -------------------------------------------------
+// These are the Task-4 read internals. The Hono routes below are thin
+// param-parsing shells over them; the MCP tools in src/mcp.ts call the same
+// helpers so HTTP and MCP can never drift apart.
 
-publicApi.get("/venues", async (c) => {
-  const type = oneOf(c.req.query("type"), VENUE_TYPES);
-  if (type === null) return c.json({ error: "invalid type", allowed: VENUE_TYPES }, 400);
-  const area = oneOf(c.req.query("area"), AREAS);
-  if (area === null) return c.json({ error: "invalid area", allowed: AREAS }, 400);
-  const halal = oneOf(c.req.query("halal"), HALAL_STATUSES);
-  if (halal === null) return c.json({ error: "invalid halal", allowed: HALAL_STATUSES }, 400);
-  const q = c.req.query("q");
+export interface PublicVenueFilters extends VenueFilters {
+  q?: string;
+}
 
-  const conds = venueConds({ type, area, halal });
-  if (q) conds.push(venueNameMatch(q));
-
-  const rows = await getDb(c.env)
+export async function listPublishedVenues(env: Env, f: PublicVenueFilters) {
+  const conds = venueConds(f);
+  if (f.q) conds.push(venueNameMatch(f.q));
+  return getDb(env)
     .select()
     .from(venues)
     .where(and(...conds))
     .limit(LIMIT);
-  return c.json({ venues: rows });
-});
+}
 
-publicApi.get("/venues/:id/items", async (c) => {
-  const db = getDb(c.env);
-  const venueId = c.req.param("id");
+// Null when the venue doesn't exist or isn't published — callers decide the
+// surface-level error (HTTP 404 vs MCP tool error).
+export async function listVenueItems(env: Env, venueId: string) {
+  const db = getDb(env);
   const [venue] = await db
     .select({ id: venues.id })
     .from(venues)
     .where(and(eq(venues.id, venueId), eq(venues.status, "published")))
     .limit(1);
-  if (!venue) return c.json({ error: "venue not found" }, 404);
+  if (!venue) return null;
 
-  const rows = await db
+  return db
     .select()
     .from(food_items)
     .where(and(eq(food_items.venue_id, venueId), eq(food_items.status, "published"), isNull(food_items.superseded_by)))
     .limit(LIMIT);
-  return c.json({ items: rows });
-});
+}
 
-publicApi.get("/search", async (c) => {
-  const db = getDb(c.env);
+export interface PublicSearchFilters {
+  venueType?: (typeof VENUE_TYPES)[number];
+  itemType?: (typeof ITEM_TYPES)[number];
+  area?: (typeof AREAS)[number];
+  halal?: (typeof HALAL_STATUSES)[number];
+  tag?: string;
+  q?: string;
+  maxPrice?: number;
+}
 
-  const venueType = oneOf(c.req.query("venue_type"), VENUE_TYPES);
-  if (venueType === null) return c.json({ error: "invalid venue_type", allowed: VENUE_TYPES }, 400);
-  const itemType = oneOf(c.req.query("item_type"), ITEM_TYPES);
-  if (itemType === null) return c.json({ error: "invalid item_type", allowed: ITEM_TYPES }, 400);
-  const area = oneOf(c.req.query("area"), AREAS);
-  if (area === null) return c.json({ error: "invalid area", allowed: AREAS }, 400);
-  const halal = oneOf(c.req.query("halal"), HALAL_STATUSES);
-  if (halal === null) return c.json({ error: "invalid halal", allowed: HALAL_STATUSES }, 400);
-  const tag = c.req.query("tag");
-  const q = c.req.query("q");
-
-  const maxPriceRaw = c.req.query("max_price");
-  let maxPrice: number | undefined;
-  if (maxPriceRaw !== undefined && maxPriceRaw !== "") {
-    maxPrice = Number(maxPriceRaw);
-    if (!Number.isFinite(maxPrice) || maxPrice < 0) {
-      return c.json({ error: "invalid max_price: must be a non-negative number" }, 400);
-    }
-  }
+export async function searchPublic(env: Env, f: PublicSearchFilters) {
+  const db = getDb(env);
 
   // Venues half: published venues matching venue-level filters + q on names.
-  const vConds = venueConds({ type: venueType, area, halal });
-  if (q) vConds.push(venueNameMatch(q));
+  const vConds = venueConds({ type: f.venueType, area: f.area, halal: f.halal });
+  if (f.q) vConds.push(venueNameMatch(f.q));
   const venueRows = await db
     .select()
     .from(venues)
@@ -124,16 +111,16 @@ publicApi.get("/search", async (c) => {
   const iConds: SQL[] = [
     eq(food_items.status, "published"),
     isNull(food_items.superseded_by),
-    ...venueConds({ type: venueType, area, halal }),
+    ...venueConds({ type: f.venueType, area: f.area, halal: f.halal }),
   ];
-  if (itemType) iConds.push(eq(food_items.item_type, itemType));
-  if (tag) {
+  if (f.itemType) iConds.push(eq(food_items.item_type, f.itemType));
+  if (f.tag) {
     // `tags` is a JSON array text column; match an exact array element via a
     // correlated json_each subquery (bound parameter, not string concat).
-    iConds.push(sql`EXISTS (SELECT 1 FROM json_each(${food_items.tags}) AS je WHERE je.value = ${tag})`);
+    iConds.push(sql`EXISTS (SELECT 1 FROM json_each(${food_items.tags}) AS je WHERE je.value = ${f.tag})`);
   }
-  if (maxPrice !== undefined) iConds.push(lte(food_items.price_bnd, maxPrice));
-  if (q) iConds.push(itemTextMatch(q));
+  if (f.maxPrice !== undefined) iConds.push(lte(food_items.price_bnd, f.maxPrice));
+  if (f.q) iConds.push(itemTextMatch(f.q));
 
   const itemRows = await db
     .select({ item: food_items })
@@ -142,7 +129,60 @@ publicApi.get("/search", async (c) => {
     .where(and(...iConds))
     .limit(LIMIT);
 
-  return c.json({ venues: venueRows, items: itemRows.map((r) => r.item) });
+  return { venues: venueRows, items: itemRows.map((r) => r.item) };
+}
+
+// --- routes ---------------------------------------------------------------
+
+const publicApi = new Hono<{ Bindings: Env }>();
+
+publicApi.get("/venues", async (c) => {
+  const type = oneOf(c.req.query("type"), VENUE_TYPES);
+  if (type === null) return c.json({ error: "invalid type", allowed: VENUE_TYPES }, 400);
+  const area = oneOf(c.req.query("area"), AREAS);
+  if (area === null) return c.json({ error: "invalid area", allowed: AREAS }, 400);
+  const halal = oneOf(c.req.query("halal"), HALAL_STATUSES);
+  if (halal === null) return c.json({ error: "invalid halal", allowed: HALAL_STATUSES }, 400);
+
+  const rows = await listPublishedVenues(c.env, { type, area, halal, q: c.req.query("q") });
+  return c.json({ venues: rows });
+});
+
+publicApi.get("/venues/:id/items", async (c) => {
+  const rows = await listVenueItems(c.env, c.req.param("id"));
+  if (!rows) return c.json({ error: "venue not found" }, 404);
+  return c.json({ items: rows });
+});
+
+publicApi.get("/search", async (c) => {
+  const venueType = oneOf(c.req.query("venue_type"), VENUE_TYPES);
+  if (venueType === null) return c.json({ error: "invalid venue_type", allowed: VENUE_TYPES }, 400);
+  const itemType = oneOf(c.req.query("item_type"), ITEM_TYPES);
+  if (itemType === null) return c.json({ error: "invalid item_type", allowed: ITEM_TYPES }, 400);
+  const area = oneOf(c.req.query("area"), AREAS);
+  if (area === null) return c.json({ error: "invalid area", allowed: AREAS }, 400);
+  const halal = oneOf(c.req.query("halal"), HALAL_STATUSES);
+  if (halal === null) return c.json({ error: "invalid halal", allowed: HALAL_STATUSES }, 400);
+
+  const maxPriceRaw = c.req.query("max_price");
+  let maxPrice: number | undefined;
+  if (maxPriceRaw !== undefined && maxPriceRaw !== "") {
+    maxPrice = Number(maxPriceRaw);
+    if (!Number.isFinite(maxPrice) || maxPrice < 0) {
+      return c.json({ error: "invalid max_price: must be a non-negative number" }, 400);
+    }
+  }
+
+  const result = await searchPublic(c.env, {
+    venueType,
+    itemType,
+    area,
+    halal,
+    tag: c.req.query("tag"),
+    q: c.req.query("q"),
+    maxPrice,
+  });
+  return c.json(result);
 });
 
 export default publicApi;

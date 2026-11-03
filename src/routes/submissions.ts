@@ -1,7 +1,8 @@
 import { eq, sql } from "drizzle-orm";
 import { Hono, type Context } from "hono";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { createAuth } from "../auth";
-import { getDb } from "../db/client";
+import { getDb, type Db } from "../db/client";
 import { SOURCE_TYPES, submissions, submitters, type Submitter } from "../db/schema";
 import type { Env } from "../env";
 import { MAX_FILE_BYTES, MAX_FILES, SNIFFED_MIME, sniffMagic } from "../lib/files";
@@ -25,6 +26,181 @@ async function sha256Hex(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
+
+// --- shared intake internals ----------------------------------------------
+// These are the Task-6 validation/processing paths. Both HTTP routes below
+// and the MCP submit_menu tool (src/mcp.ts) call them — the surfaces only
+// differ in how they authenticate and how bytes arrive.
+
+export interface IntakeResult {
+  status: number;
+  body: Record<string, unknown>;
+}
+
+// File bytes without a storage copy: `size` is known up front (declared or
+// actual), `bytes()` is called at most once per file so a legal multi-file
+// request never holds every payload in memory at once.
+export interface IntakeFile {
+  size: number;
+  bytes(): Promise<Uint8Array<ArrayBuffer>>;
+}
+
+// Submitter resolution shared by all intake paths: `authUserId` (session or
+// verified API key → submitters.auth_user_id) takes precedence; `email` is
+// the anonymous path (submitters.identifier). Returns the row, or an
+// IntakeResult early-exit (blocked submitter).
+async function resolveSubmitter(
+  db: Db,
+  { authUserId, email }: { authUserId?: string; email?: string },
+): Promise<{ submitter?: Submitter; error?: IntakeResult }> {
+  let submitter: Submitter | undefined;
+  if (authUserId) {
+    const [existing] = await db.select().from(submitters).where(eq(submitters.auth_user_id, authUserId)).limit(1);
+    submitter = existing ?? (await db.insert(submitters).values({ auth_user_id: authUserId }).returning())[0];
+  } else if (email) {
+    const [existing] = await db.select().from(submitters).where(eq(submitters.identifier, email)).limit(1);
+    submitter = existing ?? (await db.insert(submitters).values({ identifier: email, trust_tier: "anonymous" }).returning())[0];
+  }
+  if (submitter?.blocked) {
+    return { error: { status: 403, body: { error: "submitter is blocked" } } };
+  }
+  return { submitter };
+}
+
+async function bumpSubmitterCount(db: Db, submitter: Submitter): Promise<void> {
+  await db
+    .update(submitters)
+    .set({ submissions_count: sql`${submitters.submissions_count} + 1` })
+    .where(eq(submitters.id, submitter.id));
+}
+
+// File-bearing intake (menu_pdf/menu_photo/product_photo/barcode/url).
+// Validation order matches the original POST /api/submissions handler:
+// source_type → provenance → counts → sizes → submitter → sniff/store →
+// dedup → insert → queue.
+export async function intakeFileSubmission(
+  env: Env,
+  input: { sourceType: string; provenance: string; email?: string; authUserId?: string; files: IntakeFile[] },
+): Promise<IntakeResult> {
+  const { sourceType, provenance, email, authUserId, files } = input;
+  if (!sourceType || !(SOURCE_TYPES as readonly string[]).includes(sourceType)) {
+    return { status: 400, body: { error: "invalid source_type", allowed: SOURCE_TYPES } };
+  }
+  if (sourceType === "manual_entry") {
+    return { status: 400, body: { error: "manual_entry submissions go to POST /api/submissions/manual" } };
+  }
+  if (!provenance) return { status: 400, body: { error: "provenance is required" } };
+
+  if (files.length > MAX_FILES) return { status: 400, body: { error: `too many files (max ${MAX_FILES})` } };
+  // `url` submissions declare the link itself in `provenance`; every other
+  // source type must carry at least one file.
+  if (files.length === 0 && sourceType !== "url") {
+    return { status: 400, body: { error: "at least one file is required" } };
+  }
+
+  // Declared-size cap up front (no reads yet) so oversized uploads are
+  // rejected before a submitter row or R2 object can be created.
+  for (const f of files) {
+    if (f.size > MAX_FILE_BYTES) {
+      return { status: 400, body: { error: `file too large (max ${MAX_FILE_BYTES} bytes)` } };
+    }
+  }
+
+  const db = getDb(env);
+
+  // Anonymous by default; `email` ties the submission to a submitter record
+  // (created on first use) so reputation + blocking work for anonymous users.
+  // `authUserId` instead ties it to the better-auth user (session or API key).
+  const { submitter, error } = await resolveSubmitter(db, { authUserId, email });
+  if (error) return error;
+
+  // Process each file exactly once — read → magic-byte sniff → R2 → per-file
+  // sha256 — then drop the reference. A legal 10×8MB request never holds more
+  // than ~8MB of our copies at a time (formData() itself buffers the request
+  // body, which is unavoidable at this layer). Note: a mid-list magic-byte
+  // failure can leave earlier files in R2 without a DB row — harmless orphans,
+  // same trade-off as any streamed upload.
+  const id = crypto.randomUUID();
+  const imageKeys: string[] = [];
+  const fileDigests = new Uint8Array(files.length * 32);
+  for (let i = 0; i < files.length; i++) {
+    const bytes = await files[i]!.bytes();
+    const type = sniffMagic(bytes);
+    if (!type) {
+      return { status: 400, body: { error: "unsupported file type (jpeg/png/webp/pdf only)" } };
+    }
+    const key = `submissions/${id}/${i}`;
+    await env.SUBMISSIONS.put(key, bytes, { httpMetadata: { contentType: SNIFFED_MIME[type] } });
+    imageKeys.push(key);
+    fileDigests.set(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), i * 32);
+  }
+
+  // Exact-byte dedup: sha256 of the concatenated per-file digests — identical
+  // "same bytes twice" semantics as hashing the payload, using ~320 bytes
+  // instead of a second ~80MB concatenation. A second identical submission is
+  // flagged dup_sha256 (sorted last in review), not merged.
+  const autoFlags: string[] = [];
+  let sha256: string | null = null;
+  if (files.length > 0) {
+    sha256 = await sha256Hex(fileDigests);
+    const [dup] = await db.select({ id: submissions.id }).from(submissions).where(eq(submissions.sha256, sha256)).limit(1);
+    if (dup) autoFlags.push("dup_sha256");
+  }
+
+  await db.insert(submissions).values({
+    id,
+    submitter_id: submitter?.id ?? null,
+    contact: email ?? null,
+    source_type: sourceType as (typeof SOURCE_TYPES)[number],
+    provenance,
+    image_keys: imageKeys,
+    sha256,
+    auto_flags: autoFlags,
+    status: "pending",
+  });
+  if (submitter) await bumpSubmitterCount(db, submitter);
+
+  await env.SUBMISSION_QUEUE.send({ submissionId: id });
+  return { status: 201, body: { id } };
+}
+
+// Text-only manual_entry intake. Validation mirrors POST
+// /api/submissions/manual: provenance + non-empty items required, submitter
+// resolved by auth_user_id, blocked submitters rejected.
+export async function intakeManualSubmission(
+  env: Env,
+  input: { authUserId: string; provenance: string; contact: string | null; items: unknown },
+): Promise<IntakeResult> {
+  const provenance = typeof input.provenance === "string" ? input.provenance.trim() : "";
+  if (!provenance) return { status: 400, body: { error: "provenance is required" } };
+  if (!Array.isArray(input.items) || input.items.length === 0) {
+    return { status: 400, body: { error: "items must be a non-empty array" } };
+  }
+
+  const db = getDb(env);
+  const { submitter, error } = await resolveSubmitter(db, { authUserId: input.authUserId });
+  if (error) return error;
+  if (!submitter) return { status: 500, body: { error: "could not resolve submitter" } };
+
+  const id = crypto.randomUUID();
+  await db.insert(submissions).values({
+    id,
+    submitter_id: submitter.id,
+    contact: input.contact,
+    source_type: "manual_entry",
+    provenance,
+    image_keys: [],
+    raw_extraction: { items: input.items },
+    auto_flags: [],
+    status: "pending",
+  });
+  await bumpSubmitterCount(db, submitter);
+
+  await env.SUBMISSION_QUEUE.send({ submissionId: id });
+  return { status: 201, body: { id } };
+}
+
+// --- routes ---------------------------------------------------------------
 
 const submissionsApi = new Hono<{ Bindings: Env }>();
 
@@ -56,103 +232,21 @@ submissionsApi.post("/submissions", async (c) => {
     if (!ok) return c.json({ error: "turnstile verification failed" }, 403);
   }
 
-  const sourceType = str(form.get("source_type"));
-  if (!sourceType || !(SOURCE_TYPES as readonly string[]).includes(sourceType)) {
-    return c.json({ error: "invalid source_type", allowed: SOURCE_TYPES }, 400);
-  }
-  if (sourceType === "manual_entry") {
-    return c.json({ error: "manual_entry submissions go to POST /api/submissions/manual" }, 400);
-  }
-  const provenance = str(form.get("provenance"));
-  if (!provenance) return c.json({ error: "provenance is required" }, 400);
-
   const files = [...form.getAll("files"), ...form.getAll("files[]")].filter(
     (v): v is File => typeof v === "object" && v !== null && typeof (v as File).arrayBuffer === "function",
   );
-  if (files.length > MAX_FILES) return c.json({ error: `too many files (max ${MAX_FILES})` }, 400);
-  // `url` submissions declare the link itself in `provenance`; every other
-  // source type must carry at least one file.
-  if (files.length === 0 && sourceType !== "url") {
-    return c.json({ error: "at least one file is required" }, 400);
-  }
 
-  // Declared-size cap up front (no reads yet) so oversized uploads are
-  // rejected before a submitter row or R2 object can be created.
-  for (const f of files) {
-    if (f.size > MAX_FILE_BYTES) {
-      return c.json({ error: `file too large (max ${MAX_FILE_BYTES} bytes)` }, 400);
-    }
-  }
-
-  const email = str(form.get("email"));
-  const db = getDb(c.env);
-
-  // Anonymous by default; `email` ties the submission to a submitter record
-  // (created on first use) so reputation + blocking work for anonymous users.
-  let submitter: Submitter | undefined;
-  if (email) {
-    const [existing] = await db.select().from(submitters).where(eq(submitters.identifier, email)).limit(1);
-    submitter = existing ?? (await db.insert(submitters).values({ identifier: email, trust_tier: "anonymous" }).returning())[0];
-    if (submitter?.blocked) return c.json({ error: "submitter is blocked" }, 403);
-  }
-
-  // Process each file exactly once — read → magic-byte sniff → R2 → per-file
-  // sha256 — then drop the reference. A legal 10×8MB request never holds more
-  // than ~8MB of our copies at a time (formData() itself buffers the request
-  // body, which is unavoidable at this layer). Note: a mid-list magic-byte
-  // failure can leave earlier files in R2 without a DB row — harmless orphans,
-  // same trade-off as any streamed upload.
-  const id = crypto.randomUUID();
-  const imageKeys: string[] = [];
-  const fileDigests = new Uint8Array(files.length * 32);
-  for (let i = 0; i < files.length; i++) {
-    const bytes = new Uint8Array(await files[i]!.arrayBuffer());
-    const type = sniffMagic(bytes);
-    if (!type) {
-      return c.json({ error: "unsupported file type (jpeg/png/webp/pdf only)" }, 400);
-    }
-    const key = `submissions/${id}/${i}`;
-    await c.env.SUBMISSIONS.put(key, bytes, { httpMetadata: { contentType: SNIFFED_MIME[type] } });
-    imageKeys.push(key);
-    fileDigests.set(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), i * 32);
-  }
-
-  // Exact-byte dedup: sha256 of the concatenated per-file digests — identical
-  // "same bytes twice" semantics as hashing the payload, using ~320 bytes
-  // instead of a second ~80MB concatenation. A second identical submission is
-  // flagged dup_sha256 (sorted last in review), not merged.
-  const autoFlags: string[] = [];
-  let sha256: string | null = null;
-  if (files.length > 0) {
-    sha256 = await sha256Hex(fileDigests);
-    const [dup] = await db.select({ id: submissions.id }).from(submissions).where(eq(submissions.sha256, sha256)).limit(1);
-    if (dup) autoFlags.push("dup_sha256");
-  }
-
-  await db.insert(submissions).values({
-    id,
-    submitter_id: submitter?.id ?? null,
-    contact: email ?? null,
-    source_type: sourceType as (typeof SOURCE_TYPES)[number],
-    provenance,
-    image_keys: imageKeys,
-    sha256,
-    auto_flags: autoFlags,
-    status: "pending",
+  const result = await intakeFileSubmission(c.env, {
+    sourceType: str(form.get("source_type")) ?? "",
+    provenance: str(form.get("provenance")) ?? "",
+    email: str(form.get("email")),
+    files: files.map((f) => ({ size: f.size, bytes: async () => new Uint8Array(await f.arrayBuffer()) })),
   });
-  if (submitter) {
-    await db
-      .update(submitters)
-      .set({ submissions_count: sql`${submitters.submissions_count} + 1` })
-      .where(eq(submitters.id, submitter.id));
-  }
-
-  await c.env.SUBMISSION_QUEUE.send({ submissionId: id });
-  return c.json({ id }, 201);
+  return c.json(result.body, result.status as ContentfulStatusCode);
 });
 
 // POST /api/submissions/manual — text-only entry. Requires an authenticated
-// session (stubbed → always 401 until Task 8 wires better-auth).
+// session (real better-auth lookup since Task 8).
 submissionsApi.post("/submissions/manual", async (c) => {
   const session = await getSession(c);
   if (!session) return c.json({ error: "authentication required for manual_entry" }, 401);
@@ -166,39 +260,15 @@ submissionsApi.post("/submissions/manual", async (c) => {
   if (body.source_type !== "manual_entry") {
     return c.json({ error: "source_type must be manual_entry" }, 400);
   }
-  const provenance = typeof body.provenance === "string" ? body.provenance.trim() : "";
-  if (!provenance) return c.json({ error: "provenance is required" }, 400);
-  if (!Array.isArray(body.items) || body.items.length === 0) {
-    return c.json({ error: "items must be a non-empty array" }, 400);
-  }
   const contact = typeof body.contact === "string" && body.contact.trim() !== "" ? body.contact.trim() : null;
 
-  const db = getDb(c.env);
-  // Authed submitter keyed on auth_user_id — created on first submission.
-  let [submitter] = await db.select().from(submitters).where(eq(submitters.auth_user_id, session.userId)).limit(1);
-  submitter ??= (await db.insert(submitters).values({ auth_user_id: session.userId }).returning())[0];
-  if (!submitter) return c.json({ error: "could not resolve submitter" }, 500);
-  if (submitter.blocked) return c.json({ error: "submitter is blocked" }, 403);
-
-  const id = crypto.randomUUID();
-  await db.insert(submissions).values({
-    id,
-    submitter_id: submitter.id,
+  const result = await intakeManualSubmission(c.env, {
+    authUserId: session.userId,
+    provenance: typeof body.provenance === "string" ? body.provenance : "",
     contact,
-    source_type: "manual_entry",
-    provenance,
-    image_keys: [],
-    raw_extraction: { items: body.items },
-    auto_flags: [],
-    status: "pending",
+    items: body.items,
   });
-  await db
-    .update(submitters)
-    .set({ submissions_count: sql`${submitters.submissions_count} + 1` })
-    .where(eq(submitters.id, submitter.id));
-
-  await c.env.SUBMISSION_QUEUE.send({ submissionId: id });
-  return c.json({ id }, 201);
+  return c.json(result.body, result.status as ContentfulStatusCode);
 });
 
 export default submissionsApi;
