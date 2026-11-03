@@ -16,13 +16,15 @@ export interface SubmissionMessage {
 }
 
 // `suspicion` entries the extractor may name verbatim; anything else collapses
-// to `extractor_suspicion` so the model can't invent auto_flags values.
-const KNOWN_SUSPICION_FLAGS = new Set([
-  "price_outlier",
-  "venue_unverified",
-  "extractor_suspicion",
-  "phash_dup",
-]);
+// to `extractor_suspicion`. `phash_dup`/`venue_unverified` are deliberately
+// absent — deterministic flags must come from real checks, not model output.
+const KNOWN_SUSPICION_FLAGS = new Set(["price_outlier", "extractor_suspicion"]);
+
+// Must match [[queues.consumers]] max_retries in wrangler.toml — there is no
+// dead-letter queue, so the final delivery must settle the row itself or it
+// would strand in `pending` forever. Compared with >= so an attempt-count
+// off-by-one can only cost one retry, never strand the row.
+const QUEUE_MAX_RETRIES = 3;
 
 // The extraction pipeline doubles as the content filter. Order follows the
 // spec's "cheap checks first" rule: metadata forensics (conclusive, free) →
@@ -168,12 +170,24 @@ async function venueVerified(
   guess: { name: string } | null,
 ): Promise<boolean> {
   const name = guess?.name?.trim().toLowerCase();
-  if (!name) return false;
+  // <3 chars is too weak for a substring match either way.
+  if (!name || name.length < 3) return false;
   const rows = await db.select({ name: venues.name }).from(venues);
   return rows.some((row) => {
     const known = row.name.trim().toLowerCase();
-    return known.includes(name) || name.includes(known);
+    return known.length >= 3 && (known.includes(name) || name.includes(known));
   });
+}
+
+// Last-chance settle for a submission whose extraction keeps throwing: reject
+// it with a reviewable reason. Only touches rows still `pending` so a late
+// retry can't clobber a row another delivery already processed.
+async function markExtractionFailed(env: Env, id: string): Promise<void> {
+  const db = getDb(env);
+  await db
+    .update(submissions)
+    .set({ status: "auto_rejected", rejection_reason: "extraction_failed" })
+    .where(and(eq(submissions.id, id), eq(submissions.status, "pending")));
 }
 
 export async function handleQueueBatch(
@@ -191,7 +205,14 @@ export async function handleQueueBatch(
       message.ack();
     } catch (error) {
       console.error(`extraction failed for submission ${id}`, error);
-      message.retry();
+      if (message.attempts >= QUEUE_MAX_RETRIES) {
+        // Retries are exhausted — a deterministic failure must not strand
+        // the row in `pending`; reject it and ack.
+        await markExtractionFailed(env, id);
+        message.ack();
+      } else {
+        message.retry();
+      }
     }
   }
 }

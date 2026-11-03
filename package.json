@@ -13,7 +13,6 @@
     "typecheck": "bun check"
   },
   "devDependencies": {
-    "@cf-wasm/photon": "^0.4.0",
     "@cloudflare/vitest-pool-workers": "^0.23.0",
     "@cloudflare/workers-types": "^5.20261103.1",
     "@types/bun": "latest",
@@ -23,6 +22,7 @@
     "wrangler": "^4.156.2"
   },
   "dependencies": {
+    "@cf-wasm/photon": "^0.4.0",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "better-auth": "^1.7.15",
     "drizzle-orm": "^0.45.4",

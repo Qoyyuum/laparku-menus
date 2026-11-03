@@ -9,7 +9,7 @@ import {
   setStubExtractor,
   type ExtractionDraft,
 } from "../src/lib/extractor";
-import { processSubmission } from "../src/queue";
+import { handleQueueBatch, processSubmission, type SubmissionMessage } from "../src/queue";
 import { AI_GENERATED_PNG, MENU_PNG } from "./fixtures/images";
 
 // The model is never invoked in tests — wrap env so EXTRACTOR selects the
@@ -144,6 +144,60 @@ it("same image resubmitted → phash_dup flag, still pending_review (flags never
   expect(row?.phash).toBeTruthy();
   expect(row?.auto_flags).toContain("phash_dup");
   expect(row?.status).toBe("pending_review");
+});
+
+// Simulates a queue delivery: `attempts` mirrors Cloudflare's per-message
+// counter; ack/retry are recorded so the test can assert which ran.
+function fakeBatch(id: string, attempts: number) {
+  const calls = { ack: 0, retry: 0 };
+  const batch = {
+    queue: "laparku-menus-submissions",
+    metadata: { metrics: { backlogCount: 0, backlogBytes: 0 } },
+    messages: [
+      {
+        id: crypto.randomUUID(),
+        timestamp: new Date(),
+        body: { submissionId: id } satisfies SubmissionMessage,
+        attempts,
+        ack: () => calls.ack++,
+        retry: () => calls.retry++,
+      },
+    ],
+    retryAll: () => {},
+    ackAll: () => {},
+  } as unknown as MessageBatch<SubmissionMessage>;
+  return { batch, calls };
+}
+
+it("final-attempt failure → auto_rejected/extraction_failed, acked not retried (no stranding)", async () => {
+  setStubExtractor(() => {
+    throw new Error("model blew up");
+  });
+  const id = await seedSubmission();
+  const { batch, calls } = fakeBatch(id, 3); // attempts >= max_retries in wrangler.toml
+
+  await handleQueueBatch(batch, stubEnv());
+
+  expect(calls.ack).toBe(1);
+  expect(calls.retry).toBe(0);
+  const row = await getRow(id);
+  expect(row?.status).toBe("auto_rejected");
+  expect(row?.rejection_reason).toBe("extraction_failed");
+});
+
+it("earlier-attempt failure → retried, row stays pending", async () => {
+  setStubExtractor(() => {
+    throw new Error("model blew up");
+  });
+  const id = await seedSubmission();
+  const { batch, calls } = fakeBatch(id, 1);
+
+  await handleQueueBatch(batch, stubEnv());
+
+  expect(calls.retry).toBe(1);
+  expect(calls.ack).toBe(0);
+  const row = await getRow(id);
+  expect(row?.status).toBe("pending");
 });
 
 it("submission with no images (manual_entry/url) → pending_review without extraction", async () => {
