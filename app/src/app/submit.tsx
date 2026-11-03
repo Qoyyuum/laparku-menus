@@ -3,6 +3,8 @@ import * as ImagePicker from "expo-image-picker";
 import { useState } from "react";
 import { Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { API_BASE, SOURCE_TYPES } from "../api";
+import { getAuthCookie } from "../auth";
+import { SignInGate } from "../components/SignInGate";
 import { Turnstile } from "../components/Turnstile";
 
 // Source types the photo-upload form can produce (manual_entry is the
@@ -28,7 +30,17 @@ interface PickedFile {
   file?: File; // web only — avoids a second fetch of the blob
 }
 
+// Phase 2: submissions require an account — the form only renders inside a
+// session; any authenticated role may submit (not just reviewers).
 export default function SubmitScreen() {
+  return (
+    <SignInGate title="Sign in to submit a menu" callbackURL="/submit" requireReviewer={false}>
+      <SubmitForm />
+    </SignInGate>
+  );
+}
+
+function SubmitForm() {
   const [sourceType, setSourceType] = useState<(typeof PICKABLE_SOURCE_TYPES)[number]>("menu_photo");
   const [provenance, setProvenance] = useState("");
   const [email, setEmail] = useState("");
@@ -127,12 +139,20 @@ export default function SubmitScreen() {
       if (email.trim()) form.set("email", email.trim());
       if (Platform.OS === "web" && turnstileToken) form.set("turnstile_token", turnstileToken);
       await appendFiles(form);
+      // The session cookie is required now (phase 2): web sends it via
+      // credentials:"include"; native forwards the expoClient-stored cookie
+      // explicitly, like adminFetch does.
+      const headers: Record<string, string> = {};
+      if (Platform.OS !== "web") {
+        headers["X-Laparku-Client"] = "app";
+        const cookie = await getAuthCookie();
+        if (cookie) headers.cookie = cookie;
+      }
       const res = await fetch(`${API_BASE}/submissions`, {
         method: "POST",
         body: form,
-        // Native clients can't run the web Turnstile widget — the header
-        // marks them for the server's native path instead.
-        headers: Platform.OS === "web" ? undefined : { "X-Laparku-Client": "app" },
+        headers,
+        credentials: "include",
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };

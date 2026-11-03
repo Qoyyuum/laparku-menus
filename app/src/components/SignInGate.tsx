@@ -2,10 +2,21 @@ import { useState, type ReactNode } from "react";
 import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
 import { authClient, isReviewer } from "../auth";
 
-// Gate for reviewer screens: shows a magic-link sign-in form when there's no
-// session, an access notice when the signed-in user lacks the reviewer/admin
-// role, and `children` otherwise.
-export function SignInGate({ children }: { children: ReactNode }) {
+// Gate for authenticated screens: shows a magic-link sign-in form when
+// there's no session, an access notice when the signed-in user lacks the
+// reviewer/admin role (only when `requireReviewer` — plain submitters are
+// enough for e.g. the submit screen), and `children` otherwise.
+export function SignInGate({
+  children,
+  title = "Reviewer sign-in",
+  callbackURL = "/admin",
+  requireReviewer = true,
+}: {
+  children: ReactNode;
+  title?: string;
+  callbackURL?: string;
+  requireReviewer?: boolean;
+}) {
   const { data: session, isPending } = authClient.useSession();
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
@@ -24,7 +35,7 @@ export function SignInGate({ children }: { children: ReactNode }) {
     return (
       <View className="flex-1 justify-center bg-neutral-50 p-4">
         <View className="mx-auto w-full max-w-sm gap-3 rounded-xl border border-neutral-200 bg-white p-4">
-          <Text className="text-lg font-bold text-neutral-900">Reviewer sign-in</Text>
+          <Text className="text-lg font-bold text-neutral-900">{title}</Text>
           {sent ? (
             <Text className="text-sm leading-6 text-neutral-600">
               Check your email — we sent a sign-in link to {email}. Open it on this device to
@@ -50,7 +61,7 @@ export function SignInGate({ children }: { children: ReactNode }) {
                   setError(null);
                   const { error: err } = await authClient.signIn.magicLink({
                     email: email.trim(),
-                    callbackURL: "/admin",
+                    callbackURL,
                   });
                   setBusy(false);
                   if (err) setError(err.message ?? "sign-in failed");
@@ -68,7 +79,7 @@ export function SignInGate({ children }: { children: ReactNode }) {
     );
   }
 
-  if (!isReviewer(session.user as { role?: string | null })) {
+  if (requireReviewer && !isReviewer(session.user as { role?: string | null })) {
     return (
       <View className="flex-1 items-center justify-center gap-3 bg-neutral-50 p-4">
         <Text className="text-center text-base text-neutral-700">

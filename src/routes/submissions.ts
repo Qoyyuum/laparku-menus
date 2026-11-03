@@ -1,22 +1,12 @@
 import { eq, sql } from "drizzle-orm";
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import { createAuth } from "../auth";
 import { getDb, type Db } from "../db/client";
 import { SOURCE_TYPES, submissions, submitters, type Submitter } from "../db/schema";
 import type { Env } from "../env";
 import { MAX_FILE_BYTES, MAX_FILES, SNIFFED_MIME, sniffMagic } from "../lib/files";
 import { verifyTurnstile } from "../lib/turnstile";
-
-type AppContext = Context<{ Bindings: Env }>;
-
-// Real better-auth session lookup (Task 8) — the signed session cookie is
-// checked against the auth tables; any authenticated role may file a
-// manual_entry submission.
-async function getSession(c: AppContext): Promise<{ userId: string; email?: string } | null> {
-  const session = await createAuth(c.env).api.getSession({ headers: c.req.raw.headers });
-  return session ? { userId: session.user.id, email: session.user.email } : null;
-}
+import { requireAuth, type AuthVariables } from "../middleware/auth";
 
 function str(v: unknown): string | undefined {
   return typeof v === "string" && v.trim() !== "" ? v.trim() : undefined;
@@ -108,9 +98,10 @@ export async function intakeFileSubmission(
 
   const db = getDb(env);
 
-  // Anonymous by default; `email` ties the submission to a submitter record
-  // (created on first use) so reputation + blocking work for anonymous users.
-  // `authUserId` instead ties it to the better-auth user (session or API key).
+  // Every caller is authenticated (session at the HTTP routes, API key at
+  // MCP), so `authUserId` ties the submission to the better-auth user and is
+  // always set in practice. `email` survives only as the optional `contact`
+  // field; the v1 anonymous-submitter path remains for safety.
   const { submitter, error } = await resolveSubmitter(db, { authUserId, email });
   if (error) return error;
 
@@ -150,6 +141,9 @@ export async function intakeFileSubmission(
   await db.insert(submissions).values({
     id,
     submitter_id: submitter?.id ?? null,
+    // Phase 2: the authenticated identity (session user or API-key owner)
+    // is recorded on every new row. v1 anonymous rows keep user_id NULL.
+    user_id: authUserId ?? null,
     contact: email ?? null,
     source_type: sourceType as (typeof SOURCE_TYPES)[number],
     provenance,
@@ -186,6 +180,7 @@ export async function intakeManualSubmission(
   await db.insert(submissions).values({
     id,
     submitter_id: submitter.id,
+    user_id: input.authUserId,
     contact: input.contact,
     source_type: "manual_entry",
     provenance,
@@ -202,12 +197,18 @@ export async function intakeManualSubmission(
 
 // --- routes ---------------------------------------------------------------
 
-const submissionsApi = new Hono<{ Bindings: Env }>();
+const submissionsApi = new Hono<{ Bindings: Env; Variables: AuthVariables }>();
 
-// POST /api/submissions — public multipart intake. Fields: `files[]`/`files`
-// (jpeg/png/webp/pdf), `source_type`, `provenance`, `turnstile_token` (web),
-// optional `email`.
-submissionsApi.post("/submissions", async (c) => {
+// Phase 2: both submission routes require a session — any authenticated
+// role may submit. Anonymous uploads (allowed in v1) now get 401 before any
+// validation runs; banned users get 403. The X-Laparku-Client header is
+// still only a rate-limit signal, never an auth substitute.
+const SUBMIT_ROLES = ["submitter", "reviewer", "admin"];
+
+// POST /api/submissions — authenticated multipart intake. Fields:
+// `files[]`/`files` (jpeg/png/webp/pdf), `source_type`, `provenance`,
+// `turnstile_token` (web), optional `email`.
+submissionsApi.post("/submissions", requireAuth(SUBMIT_ROLES), async (c) => {
   let form: FormData;
   try {
     // undici-types (via @types/bun) and workers-types disagree on the FormData
@@ -240,17 +241,15 @@ submissionsApi.post("/submissions", async (c) => {
     sourceType: str(form.get("source_type")) ?? "",
     provenance: str(form.get("provenance")) ?? "",
     email: str(form.get("email")),
+    authUserId: c.get("user").id,
     files: files.map((f) => ({ size: f.size, bytes: async () => new Uint8Array(await f.arrayBuffer()) })),
   });
   return c.json(result.body, result.status as ContentfulStatusCode);
 });
 
 // POST /api/submissions/manual — text-only entry. Requires an authenticated
-// session (real better-auth lookup since Task 8).
-submissionsApi.post("/submissions/manual", async (c) => {
-  const session = await getSession(c);
-  if (!session) return c.json({ error: "authentication required for manual_entry" }, 401);
-
+// session (requireAuth since phase 2 — was an inline getSession check in v1).
+submissionsApi.post("/submissions/manual", requireAuth(SUBMIT_ROLES), async (c) => {
   let body: { source_type?: unknown; provenance?: unknown; contact?: unknown; items?: unknown };
   try {
     body = await c.req.json();
@@ -263,7 +262,7 @@ submissionsApi.post("/submissions/manual", async (c) => {
   const contact = typeof body.contact === "string" && body.contact.trim() !== "" ? body.contact.trim() : null;
 
   const result = await intakeManualSubmission(c.env, {
-    authUserId: session.userId,
+    authUserId: c.get("user").id,
     provenance: typeof body.provenance === "string" ? body.provenance : "",
     contact,
     items: body.items,

@@ -68,6 +68,12 @@ export const submissions = sqliteTable(
   {
     id: id(),
     submitter_id: text("submitter_id").references(() => submitters.id),
+    // Better-auth user that filed the submission (session or verified API
+    // key). Nullable: v1-era anonymous rows are grandfathered; every new
+    // write sets it. The FK to "user".id lives in 0002_phase2.sql — the
+    // auth tables stay outside drizzle's tracked schema (same convention
+    // as reviewer_id below).
+    user_id: text("user_id"),
     // Anonymous contact (email/phone). Required at the route level for
     // text-only (`manual_entry`) entries.
     contact: text("contact"),
@@ -100,6 +106,7 @@ export const submissions = sqliteTable(
     index("submissions_sha256_idx").on(t.sha256),
     index("submissions_phash_idx").on(t.phash),
     index("submissions_submitter_idx").on(t.submitter_id),
+    index("submissions_user_id_idx").on(t.user_id),
   ],
 );
 

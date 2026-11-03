@@ -133,7 +133,7 @@ it("submit_menu with a bad api_key returns an auth error", async () => {
 });
 
 it("submit_menu manual_entry creates a pending submission for the key's user", async () => {
-  const { key } = await makeApiKey();
+  const { key, userId } = await makeApiKey();
   const body = await callToolJson("submit_menu", {
     api_key: key,
     payload: {
@@ -150,6 +150,8 @@ it("submit_menu manual_entry creates a pending submission for the key's user", a
   const [row] = await getDb(env).select().from(submissions).where(eq(submissions.id, id));
   expect(row?.source_type).toBe("manual_entry");
   expect(row?.contact).toBe("owner@example.com");
+  // API-key identity lands on the same user_id column as session submits.
+  expect(row?.user_id).toBe(userId);
 });
 
 it("submit_menu rejects an invalid source_type", async () => {

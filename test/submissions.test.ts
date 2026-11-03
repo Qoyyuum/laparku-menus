@@ -6,6 +6,7 @@ import { getDb } from "../src/db/client";
 import { submissions } from "../src/db/schema";
 import type { Env } from "../src/env";
 import submissionsApi from "../src/routes/submissions";
+import { forgeSession } from "./helpers/auth";
 
 // Real PNG magic bytes + arbitrary filler — sniffMagic only reads the
 // signature. PNG_A and PNG_B differ after the header so their sha256s differ.
@@ -45,13 +46,16 @@ function pngForm(bytes: Uint8Array, extra: Record<string, string> = {}): FormDat
   return form;
 }
 
-function postSubmission(e: Env, form: FormData) {
-  return app.request("/api/submissions", { method: "POST", body: form }, e);
+// Phase 2: every submission write needs a session. `cookie` comes from
+// forgeSession; pass the same one to share a submitter across calls.
+function postSubmission(e: Env, form: FormData, cookie: string) {
+  return app.request("/api/submissions", { method: "POST", headers: { cookie }, body: form }, e);
 }
 
 it("accepts a real PNG: 201, pending row, R2 object, queue message", async () => {
+  const { cookie } = await forgeSession("submitter");
   const q = queueMock();
-  const res = await postSubmission(q.env, pngForm(PNG_A));
+  const res = await postSubmission(q.env, pngForm(PNG_A), cookie);
   expect(res.status).toBe(201);
   const { id } = (await res.json()) as { id: string };
   expect(id).toBeTruthy();
@@ -74,9 +78,10 @@ it("accepts a real PNG: 201, pending row, R2 object, queue message", async () =>
 });
 
 it("Review Focus #2: .exe bytes labeled image/png are rejected with 400", async () => {
+  const { cookie } = await forgeSession("submitter");
   const q = queueMock();
   const before = await getDb(env).select().from(submissions);
-  const res = await postSubmission(q.env, pngForm(EXE));
+  const res = await postSubmission(q.env, pngForm(EXE), cookie);
   expect(res.status).toBe(400);
   expect(q.sent).toHaveLength(0);
   const after = await getDb(env).select().from(submissions);
@@ -84,11 +89,12 @@ it("Review Focus #2: .exe bytes labeled image/png are rejected with 400", async 
 });
 
 it("missing provenance is rejected with 400", async () => {
+  const { cookie } = await forgeSession("submitter");
   const q = queueMock();
   const form = new FormData();
   form.set("source_type", "menu_photo");
   form.append("files", new File([PNG_A], "m.png", { type: "image/png" }));
-  const res = await postSubmission(q.env, form);
+  const res = await postSubmission(q.env, form, cookie);
   expect(res.status).toBe(400);
   expect(q.sent).toHaveLength(0);
 });
@@ -118,12 +124,13 @@ it("Review Focus #4: anonymous manual_entry gets 401 and creates no row", async 
 });
 
 it("Review Focus #5: identical bytes resubmitted → second row flagged dup_sha256", async () => {
+  const { cookie } = await forgeSession("submitter");
   const q = queueMock();
-  const res1 = await postSubmission(q.env, pngForm(PNG_B));
+  const res1 = await postSubmission(q.env, pngForm(PNG_B), cookie);
   expect(res1.status).toBe(201);
   const { id: id1 } = (await res1.json()) as { id: string };
 
-  const res2 = await postSubmission(q.env, pngForm(PNG_B, { provenance: "same menu, submitted again" }));
+  const res2 = await postSubmission(q.env, pngForm(PNG_B, { provenance: "same menu, submitted again" }), cookie);
   expect(res2.status).toBe(201);
   const { id: id2 } = (await res2.json()) as { id: string };
   expect(id2).not.toBe(id1);
@@ -139,8 +146,9 @@ it("Review Focus #5: identical bytes resubmitted → second row flagged dup_sha2
 });
 
 it("magic bytes decide type: PDF bytes labeled image/png are stored as pdf", async () => {
+  const { cookie } = await forgeSession("submitter");
   const q = queueMock();
-  const res = await postSubmission(q.env, pngForm(PDF));
+  const res = await postSubmission(q.env, pngForm(PDF), cookie);
   expect(res.status).toBe(201);
   const { id } = (await res.json()) as { id: string };
   const obj = await env.SUBMISSIONS.get(`submissions/${id}/0`);

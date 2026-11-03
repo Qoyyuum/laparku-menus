@@ -159,22 +159,27 @@ it("admin flags endpoints reject non-reviewers", async () => {
 // --- (b) blocked submitters --------------------------------------------------
 
 it("a blocked submitter's POST /api/submissions gets 403 and no row", async () => {
-  const email = `blocked-${crypto.randomUUID()}@test.dev`;
-  await db().insert(submitters).values({ identifier: email, trust_tier: "anonymous", blocked: true });
+  // Phase 2: submitters are resolved by auth_user_id (the session user), so
+  // the blocked row is seeded against a forged user rather than an email.
+  const { cookie, userId } = await forgeSession("submitter");
+  await db().insert(submitters).values({ auth_user_id: userId, blocked: true });
 
   const form = new FormData();
   form.set("source_type", "menu_photo");
   form.set("provenance", "photo of the menu board");
-  form.set("email", email);
   form.append("files", new File([PNG], "menu.png", { type: "image/png" }));
 
   const sent: unknown[] = [];
   const e = envWith({ SUBMISSION_QUEUE: { send: async (m: unknown) => void sent.push(m) } });
-  const res = await intakeApp.request("/api/submissions", { method: "POST", body: form }, e);
+  const res = await intakeApp.request(
+    "/api/submissions",
+    { method: "POST", headers: { cookie }, body: form },
+    e,
+  );
   expect(res.status).toBe(403);
   expect(sent).toHaveLength(0);
   // The submitter exists (seeded above) but no submission row was created.
-  const [submitter] = await db().select().from(submitters).where(eq(submitters.identifier, email));
+  const [submitter] = await db().select().from(submitters).where(eq(submitters.auth_user_id, userId));
   expect(
     await db().select().from(submissions).where(eq(submissions.submitter_id, submitter!.id)),
   ).toHaveLength(0);
@@ -183,25 +188,28 @@ it("a blocked submitter's POST /api/submissions gets 403 and no row", async () =
 // --- (c) reputation counters feed the queue sort ----------------------------
 
 it("intake → approve/reject updates the submitter accept-ratio counters end-to-end", async () => {
-  const email = `counts-${crypto.randomUUID()}@test.dev`;
+  const { cookie: submitterCookie, userId } = await forgeSession("submitter");
   const sent: unknown[] = [];
   const e = envWith({ SUBMISSION_QUEUE: { send: async (m: unknown) => void sent.push(m) } });
 
-  // Three real intake calls under the same email → one submitter, count 3.
+  // Three real intake calls under the same session → one submitter, count 3.
   const ids: string[] = [];
   for (let i = 0; i < 3; i++) {
     const form = new FormData();
     form.set("source_type", "menu_photo");
     form.set("provenance", `photo of menu page ${i + 1}`);
-    form.set("email", email);
     form.append("files", new File([PNG], `m${i}.png`, { type: "image/png" }));
-    const res = await intakeApp.request("/api/submissions", { method: "POST", body: form }, e);
+    const res = await intakeApp.request(
+      "/api/submissions",
+      { method: "POST", headers: { cookie: submitterCookie }, body: form },
+      e,
+    );
     expect(res.status).toBe(201);
     ids.push(((await res.json()) as { id: string }).id);
   }
-  const [submitter] = await db().select().from(submitters).where(eq(submitters.identifier, email));
+  const [submitter] = await db().select().from(submitters).where(eq(submitters.auth_user_id, userId));
   expect(submitter?.submissions_count).toBe(3);
-  expect(submitter?.trust_tier).toBe("anonymous");
+  expect(submitter?.trust_tier).toBe("new");
 
   // Extraction pipeline would flip pending → pending_review; simulate that.
   await db().update(submissions).set({ status: "pending_review" }).where(inArray(submissions.id, ids));
@@ -228,8 +236,8 @@ it("intake → approve/reject updates the submitter accept-ratio counters end-to
   expect(after?.rejected_count).toBe(1);
 
   // The submitter's remaining pending_review row surfaces in the queue with
-  // the trust tier join the sort depends on (anonymous here → sinks below
-  // trusted/new submitters).
+  // the trust tier join the sort depends on ("new" here → below trusted,
+  // above anonymous submitters).
   const res = await SELF.fetch("https://x/api/admin/submissions?status=pending_review", {
     headers: { cookie },
   });
@@ -237,6 +245,6 @@ it("intake → approve/reject updates the submitter accept-ratio counters end-to
     submissions: { id: string; submitter_trust_tier: string | null }[];
   };
   const remaining = list.find((s) => s.id === ids[2]);
-  expect(remaining?.submitter_trust_tier).toBe("anonymous");
+  expect(remaining?.submitter_trust_tier).toBe("new");
   expect(list.find((s) => s.id === ids[0] || s.id === ids[1])).toBeUndefined();
 });
