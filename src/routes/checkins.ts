@@ -75,11 +75,12 @@ checkinsApi.post("/venues/:id/checkin", requireAuth(CHECKIN_ROLES), async (c) =>
   if (!venue) return c.json({ error: "venue not found" }, 404);
 
   const userId = c.get("user").id;
-  const dayStart = utcDayStart(new Date());
+  const now = new Date();
+  const dayStart = utcDayStart(now);
 
-  // Counted caps. The venue/day UNIQUE expression index
-  // (check_ins_daily_idx) is the race backstop; counting first is what lets
-  // a normal repeat get a 429 instead of a constraint error.
+  // Venue/day cap: a pre-check for the friendly 429; the check_ins_daily_idx
+  // UNIQUE expression index is its atomic race backstop (see the insert's
+  // catch below).
   const [venueToday] = await db
     .select({ n: sql<number>`count(*)` })
     .from(check_ins)
@@ -93,50 +94,63 @@ checkinsApi.post("/venues/:id/checkin", requireAuth(CHECKIN_ROLES), async (c) =>
   if (Number(venueToday?.n ?? 0) >= MAX_PER_VENUE_PER_DAY) {
     return c.json({ error: "already checked in at this venue today" }, 429);
   }
-  const [userToday] = await db
-    .select({ n: sql<number>`count(*)` })
-    .from(check_ins)
-    .where(and(eq(check_ins.user_id, userId), gte(check_ins.created_at, dayStart)));
-  if (Number(userToday?.n ?? 0) >= MAX_PER_USER_PER_DAY) {
-    return c.json({ error: "daily check-in limit reached" }, 429);
-  }
 
-  const now = new Date();
-  let row: typeof check_ins.$inferSelect | undefined;
+  // The 20/day cap is enforced INSIDE the insert — a plain count-then-insert
+  // lets two concurrent requests both read 19 and both write a 20th and
+  // 21st row. `INSERT ... SELECT ... WHERE (count) < cap` evaluates the cap
+  // atomically with the write; zero RETURNING rows means the cap was hit.
+  // Bound values are raw SQLite types (epoch-ms ints, 1/0 for the bool —
+  // D1 doesn't accept Date/boolean bind params).
+  const id = crypto.randomUUID();
+  const geoLat = body.lat === undefined ? null : (body.lat as number);
+  const geoLng = body.lng === undefined ? null : (body.lng as number);
+  const menuAccurate =
+    body.menu_accurate === undefined ? null : (body.menu_accurate as boolean) ? 1 : 0;
+  let inserted: Record<string, unknown> | undefined;
   try {
-    [row] = await db
-      .insert(check_ins)
-      .values({
-        venue_id: venue.id,
-        user_id: userId,
-        geo_lat: (body.lat as number | undefined) ?? null,
-        geo_lng: (body.lng as number | undefined) ?? null,
-        menu_accurate: (body.menu_accurate as boolean | undefined) ?? null,
-        created_at: now,
-      })
-      .returning();
+    inserted = (await db.get(sql`
+      INSERT INTO check_ins (id, venue_id, user_id, geo_lat, geo_lng, menu_accurate, created_at)
+      SELECT ${id}, ${venue.id}, ${userId}, ${geoLat}, ${geoLng}, ${menuAccurate}, ${now.getTime()}
+      WHERE (
+        SELECT count(*) FROM check_ins
+        WHERE user_id = ${userId} AND created_at >= ${dayStart.getTime()}
+      ) < ${MAX_PER_USER_PER_DAY}
+      RETURNING id
+    `)) as Record<string, unknown> | undefined;
   } catch (e) {
-    // Race loser of the same-day double-check-in: the UNIQUE index fires,
-    // which from the user's perspective is still just "already checked in".
+    // Race loser of the same-day double-check-in at the same venue: the
+    // UNIQUE index fires, which from the user's perspective is still just
+    // "already checked in".
     if (e instanceof Error && /unique/i.test(e.message)) {
       return c.json({ error: "already checked in at this venue today" }, 429);
     }
     throw e;
   }
+  if (!inserted) {
+    return c.json({ error: "daily check-in limit reached" }, 429);
+  }
 
   await db.update(venues).set({ last_checkin_at: now }).where(eq(venues.id, venue.id));
   if (body.menu_accurate !== undefined) {
-    await recordVerification(db, venue.id, userId, body.menu_accurate as boolean);
+    // recordVerification retries its own same-day UNIQUE race internally;
+    // if it still can't land the vote, the committed check-in still counts —
+    // a verification row for today already exists in that failure mode, so
+    // the signal wasn't lost anyway.
+    try {
+      await recordVerification(db, venue.id, userId, body.menu_accurate as boolean);
+    } catch (e) {
+      if (!(e instanceof Error) || !/unique/i.test(e.message)) throw e;
+    }
   }
 
   return c.json(
     {
-      id: row!.id,
-      venue_id: row!.venue_id,
-      menu_accurate: row!.menu_accurate,
-      geo_lat: row!.geo_lat,
-      geo_lng: row!.geo_lng,
-      created_at: row!.created_at,
+      id,
+      venue_id: venue.id,
+      menu_accurate: menuAccurate === null ? null : menuAccurate === 1,
+      geo_lat: geoLat,
+      geo_lng: geoLng,
+      created_at: now,
     },
     201,
   );

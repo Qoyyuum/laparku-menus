@@ -60,6 +60,27 @@ export async function recordVerification(
   userId: string,
   accurate: boolean,
 ): Promise<{ vote: Verification; created: boolean }> {
+  try {
+    return await recordVerificationOnce(db, venueId, userId, accurate);
+  } catch (e) {
+    // Same-day first-vote race: a concurrent request (a parallel /verify or
+    // a check-in carrying menu_accurate) inserted today's row between our
+    // read and insert, and verifications_daily_idx fired. One retry lands
+    // on the ordinary same-day UPDATE path now that the row exists — the
+    // loser's vote still applies instead of 500ing.
+    if (e instanceof Error && /unique/i.test(e.message)) {
+      return await recordVerificationOnce(db, venueId, userId, accurate);
+    }
+    throw e;
+  }
+}
+
+async function recordVerificationOnce(
+  db: Db,
+  venueId: string,
+  userId: string,
+  accurate: boolean,
+): Promise<{ vote: Verification; created: boolean }> {
   const now = new Date();
   const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   const [today] = await db

@@ -85,6 +85,45 @@ it("25 check-ins in one day: requests 21+ return 429 and the stored count stays 
   expect(Number(countRow!.n)).toBe(20);
 });
 
+it("25 concurrent check-ins in one day still cap at exactly 20", async () => {
+  const { cookie, userId } = await forgeSession("submitter");
+  const venues25 = await Promise.all(Array.from({ length: 25 }, () => seedVenue()));
+  // In-flight requests interleave — the atomic INSERT ... WHERE count<20
+  // must hold the cap even when reads overlap.
+  const res = await Promise.all(venues25.map((v) => checkin(v.id, {}, cookie)));
+  expect(res.filter((r) => r.status === 201)).toHaveLength(20);
+  expect(res.filter((r) => r.status === 429)).toHaveLength(5);
+
+  const [countRow] = await db()
+    .select({ n: sql<number>`count(*)` })
+    .from(check_ins)
+    .where(eq(check_ins.user_id, userId));
+  expect(Number(countRow!.n)).toBe(20);
+});
+
+it("a check-in with menu_accurate concurrent with a verify vote still lands one vote", async () => {
+  const venue = await seedVenue();
+  const { cookie, userId } = await forgeSession("submitter");
+  const [verifyRes, checkinRes] = await Promise.all([
+    SELF.fetch(`https://x/api/venues/${venue.id}/verify`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ accurate: true }),
+    }),
+    checkin(venue.id, { menu_accurate: false }, cookie),
+  ]);
+  // Neither side may 500 on the verifications_daily_idx race; the committed
+  // check-in still returns 201.
+  expect([200, 201]).toContain(verifyRes.status);
+  expect(checkinRes.status).toBe(201);
+  // One row per user/venue/day regardless of which request landed first.
+  const votes = await db()
+    .select()
+    .from(verifications)
+    .where(and(eq(verifications.venue_id, venue.id), eq(verifications.user_id, userId)));
+  expect(votes).toHaveLength(1);
+});
+
 it("a second check-in at the same venue the same day returns 429", async () => {
   const venue = await seedVenue();
   const other = await seedVenue();
