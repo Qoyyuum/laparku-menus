@@ -316,7 +316,13 @@ export async function publishSubmission(
       status: "published",
       is_current: true,
     }));
-    if (rows.length > 0) await db.insert(food_items).values(rows);
+    // Batched like the supersede above: each row binds 17 params, so ≥6
+    // rows in one VALUES clause would overflow D1's ~100 bound-param cap —
+    // and a real menu extraction routinely exceeds 6 draft items.
+    const INSERT_CHUNK = 5; // 5×17 = 85 bound params
+    for (let off = 0; off < rows.length; off += INSERT_CHUNK) {
+      await db.insert(food_items).values(rows.slice(off, off + INSERT_CHUNK));
+    }
 
     const revisionId = await recordRevision(db, {
       venueId: venue.id,

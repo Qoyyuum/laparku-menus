@@ -226,6 +226,37 @@ it("a merge keeping >100 existing items stays under D1's bound-param cap", async
   for (const d of dropped) expect(liveIds.has(d.id)).toBe(false);
 });
 
+it("an approve with >10 draft items batches the insert under D1's bound-param cap", async () => {
+  // Each draft row binds ~11 params — a single 12-row INSERT would overflow
+  // the ~100 bound-param cap. Real menu extractions routinely exceed 9 items.
+  const { venue } = await seedVenueWithMenu(2, "BatchHost");
+  const draftCount = 12;
+  const sub = await seedSubmission();
+  const { cookie } = await forgeSession("reviewer");
+
+  const res = await approve(sub.id, cookie, {
+    venue_id: venue.id,
+    mode: "replace",
+    items: Array.from({ length: draftCount }, (_, i) => ({
+      source: "draft",
+      draft_index: i,
+      name: `Draft Dish ${i}`,
+      price_bnd: 1.0 + i * 0.5,
+      item_type: "dish",
+    })),
+  });
+  expect(res.status).toBe(200);
+  const body = (await res.json()) as { items_published: number; items_superseded: number };
+  expect(body.items_published).toBe(draftCount);
+  expect(body.items_superseded).toBe(2);
+
+  const live = await liveItems(venue.id);
+  expect(live).toHaveLength(draftCount);
+  for (let i = 0; i < draftCount; i++) {
+    expect(live.map((it) => it.name)).toContain(`Draft Dish ${i}`);
+  }
+});
+
 it("a replace on a >100-item venue supersedes the whole menu", async () => {
   const { venue } = await seedVenueWithMenu(120, "SuperReplace");
   const sub = await seedSubmission();
