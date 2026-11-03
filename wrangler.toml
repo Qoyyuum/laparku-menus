@@ -5,6 +5,10 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 PUBLIC_BASE_URL = "http://localhost:8787"
+# Extraction pipeline: Workers AI vision model + provider selector
+# ("workers-ai" in production; tests override EXTRACTOR with "stub").
+EXTRACTION_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct"
+EXTRACTOR = "workers-ai"
 
 [[d1_databases]]
 binding = "DB"

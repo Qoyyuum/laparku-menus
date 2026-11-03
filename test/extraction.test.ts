@@ -1,0 +1,161 @@
+import { env } from "cloudflare:test";
+import { eq } from "drizzle-orm";
+import { afterEach, expect, it } from "vitest";
+import { getDb } from "../src/db/client";
+import { SOURCE_TYPES, submissions } from "../src/db/schema";
+import type { Env } from "../src/env";
+import {
+  resetStubExtractor,
+  setStubExtractor,
+  type ExtractionDraft,
+} from "../src/lib/extractor";
+import { processSubmission } from "../src/queue";
+import { AI_GENERATED_PNG, MENU_PNG } from "./fixtures/images";
+
+// The model is never invoked in tests — wrap env so EXTRACTOR selects the
+// `stub` provider (Workers AI is a remote binding and can't run locally).
+function stubEnv(): Env {
+  return new Proxy(env, {
+    get(target, prop) {
+      if (prop === "EXTRACTOR") return "stub";
+      return Reflect.get(target, prop);
+    },
+  }) as Env;
+}
+
+const NO_FOOD_DRAFT: ExtractionDraft = {
+  has_food_content: false,
+  confidence: 0.97,
+  venue_guess: null,
+  items: [],
+  suspicion: [],
+};
+
+const MENU_DRAFT: ExtractionDraft = {
+  has_food_content: true,
+  confidence: 0.86,
+  venue_guess: null,
+  items: [
+    { name: "Nasi Lemak", price_bnd: 3.5, category: "Rice", item_type: "dish" },
+    { name: "Teh Tarik", price_bnd: 1.0, item_type: "dish" },
+  ],
+  suspicion: [],
+};
+
+async function seedSubmission(image: Uint8Array | null = MENU_PNG, sourceType: (typeof SOURCE_TYPES)[number] = "menu_photo"): Promise<string> {
+  const id = crypto.randomUUID();
+  const keys: string[] = [];
+  if (image) {
+    const key = `submissions/${id}/0`;
+    await env.SUBMISSIONS.put(key, image, { httpMetadata: { contentType: "image/png" } });
+    keys.push(key);
+  }
+  await getDb(env)
+    .insert(submissions)
+    .values({
+      id,
+      source_type: sourceType,
+      provenance: "photo of the physical menu",
+      image_keys: keys,
+      auto_flags: [],
+      status: "pending",
+    });
+  return id;
+}
+
+async function getRow(id: string) {
+  const [row] = await getDb(env).select().from(submissions).where(eq(submissions.id, id));
+  return row;
+}
+
+afterEach(() => resetStubExtractor());
+
+it("Review Focus #1: no food content → auto_rejected/no_food_content, R2 objects retained", async () => {
+  setStubExtractor(NO_FOOD_DRAFT);
+  const id = await seedSubmission();
+  await processSubmission(stubEnv(), id);
+
+  const row = await getRow(id);
+  expect(row?.status).toBe("auto_rejected");
+  expect(row?.rejection_reason).toBe("no_food_content");
+  // Source bytes are kept in R2 — an auto-rejected submission is still evidence.
+  expect(await env.SUBMISSIONS.get(`submissions/${id}/0`)).not.toBeNull();
+});
+
+it("PNG with a generator text chunk → auto_rejected/generator_signature, extractor never reached", async () => {
+  let extractorCalls = 0;
+  setStubExtractor(() => {
+    extractorCalls++;
+    return MENU_DRAFT;
+  });
+  const id = await seedSubmission(AI_GENERATED_PNG);
+  await processSubmission(stubEnv(), id);
+
+  const row = await getRow(id);
+  expect(row?.status).toBe("auto_rejected");
+  expect(row?.rejection_reason).toBe("generator_signature");
+  expect(row?.auto_flags).toContain("generator_signature");
+  // Forensics run before the model — conclusive signatures cost no AI calls.
+  expect(extractorCalls).toBe(0);
+});
+
+it("happy path → draft stored in raw_extraction, confidence, status pending_review", async () => {
+  setStubExtractor(MENU_DRAFT);
+  const id = await seedSubmission();
+  await processSubmission(stubEnv(), id);
+
+  const row = await getRow(id);
+  expect(row?.status).toBe("pending_review");
+  expect(row?.rejection_reason).toBeNull();
+  expect(row?.confidence).toBe(0.86);
+  expect(row?.raw_extraction?.items).toHaveLength(2);
+  expect((row?.raw_extraction?.items as { name: string }[])[0]?.name).toBe("Nasi Lemak");
+  expect(row?.phash).toMatch(/^[0-9a-f]{16}$/);
+  // venue_guess:null can't be verified against the venues table → flagged for
+  // the bottom of the review queue. Flags never auto-reject.
+  expect(row?.auto_flags).toContain("venue_unverified");
+});
+
+it("consumer invoked twice → second run no-ops (at-least-once delivery)", async () => {
+  let extractorCalls = 0;
+  setStubExtractor(() => {
+    extractorCalls++;
+    return MENU_DRAFT;
+  });
+  const id = await seedSubmission();
+  const e = stubEnv();
+  await processSubmission(e, id);
+  await processSubmission(e, id);
+
+  expect(extractorCalls).toBe(1);
+  const row = await getRow(id);
+  expect(row?.status).toBe("pending_review");
+});
+
+it("same image resubmitted → phash_dup flag, still pending_review (flags never auto-reject)", async () => {
+  setStubExtractor(MENU_DRAFT);
+  const e = stubEnv();
+  const first = await seedSubmission();
+  await processSubmission(e, first);
+  const second = await seedSubmission();
+  await processSubmission(e, second);
+
+  const row = await getRow(second);
+  expect(row?.phash).toBeTruthy();
+  expect(row?.auto_flags).toContain("phash_dup");
+  expect(row?.status).toBe("pending_review");
+});
+
+it("submission with no images (manual_entry/url) → pending_review without extraction", async () => {
+  let extractorCalls = 0;
+  setStubExtractor(() => {
+    extractorCalls++;
+    return MENU_DRAFT;
+  });
+  const id = await seedSubmission(null, "manual_entry");
+  await processSubmission(stubEnv(), id);
+
+  const row = await getRow(id);
+  expect(row?.status).toBe("pending_review");
+  expect(extractorCalls).toBe(0);
+});

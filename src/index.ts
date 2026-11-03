@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { Env } from "./env";
+import { handleQueueBatch, type SubmissionMessage } from "./queue";
 import publicApi from "./routes/public";
 import submissionsApi from "./routes/submissions";
 
@@ -20,11 +21,7 @@ export default {
     // index.html for client-side routes (e.g. /search).
     return env.ASSETS.fetch(request);
   },
-  async queue(
-    _batch: MessageBatch<unknown>,
-    _env: Env,
-    _ctx: ExecutionContext,
-  ): Promise<void> {
-    // Stub: submission extraction/review pipeline lands in a later task.
+  async queue(batch: MessageBatch<SubmissionMessage>, env: Env): Promise<void> {
+    await handleQueueBatch(batch, env);
   },
 };
