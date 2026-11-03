@@ -1,0 +1,28 @@
+{
+  "name": "laparku-menus",
+  "module": "src/index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "vitest run",
+    "typecheck": "bun check"
+  },
+  "devDependencies": {
+    "@cf-wasm/photon": "^0.4.0",
+    "@cloudflare/vitest-pool-workers": "^0.23.0",
+    "@cloudflare/workers-types": "^5.20261103.1",
+    "@types/bun": "latest",
+    "drizzle-kit": "^0.31.11",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.0",
+    "wrangler": "^4.156.2"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "better-auth": "^1.7.15",
+    "drizzle-orm": "^0.45.4",
+    "hono": "^4.13.16"
+  }
+}

@@ -1,0 +1,36 @@
+name = "laparku-menus"
+main = "src/index.ts"
+compatibility_date = "2026-08-22"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+PUBLIC_BASE_URL = "http://localhost:8787"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "laparku-menus"
+# TODO: run `wrangler d1 create laparku-menus` and paste the real ID before deploy
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[[r2_buckets]]
+binding = "SUBMISSIONS"
+bucket_name = "laparku-menus-submissions"
+
+[[queues.producers]]
+binding = "SUBMISSION_QUEUE"
+queue = "laparku-menus-submissions"
+
+[[queues.consumers]]
+queue = "laparku-menus-submissions"
+max_retries = 3
+
+# Expo web export output (Task: Expo app). Placeholder dir for now.
+[assets]
+directory = "./app/dist"
+binding = "ASSETS"
+
+[ai]
+binding = "AI"
+
+# Secrets (TURNSTILE_SECRET_KEY, BETTER_AUTH_SECRET, RESEND_API_KEY) are set via
+# `wrangler secret put` — never in this file.
