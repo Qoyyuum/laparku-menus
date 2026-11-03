@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>laparku — Brunei's crowdsourced food &amp; beverage dataset</title>
+  <meta name="description" content="laparku is a crowdsourced, searchable dataset of Brunei's food &amp; beverage menus and products — restaurants, stalls, supermarkets and grocers — powering apps and agents through a public API and MCP endpoint.">
+  <!-- Single source of truth for the menu app URL. Update this one value to repoint
+       every menu-app link on the page (script at the bottom applies it). -->
+  <meta name="menu-url" content="https://laparku-menus.workers.dev">
+  <meta property="og:title" content="laparku — Brunei's crowdsourced F&amp;B dataset">
+  <meta property="og:description" content="Every menu in Brunei, in one open dataset. Public API + MCP endpoint. Community-built and open to contributors.">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍜</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="#top" aria-label="laparku home">
+        <span class="brand-mark" aria-hidden="true">🍜</span> laparku
+      </a>
+      <nav class="site-nav" aria-label="Main">
+        <a data-menu-url href="https://laparku-menus.workers.dev">Menu&nbsp;app</a>
+        <a href="https://github.com/Qoyyuum/laparku-menus" rel="noopener">GitHub</a>
+        <a href="https://buymeacoffee.com/qoyyuum" rel="noopener">Support</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="top">
+
+    <section class="hero container">
+      <p class="eyebrow">A public, crowdsourced dataset · Brunei Darussalam</p>
+      <h1>Every menu in Brunei,<br>one open dataset.</h1>
+      <p class="lede">
+        <strong>laparku</strong> — from <em>lapar</em>, “hungry” — is a community-built,
+        searchable collection of food &amp; beverage menus and products: restaurants,
+        roadside stalls, supermarkets and grocers. It powers apps, agents and healthier
+        choices through a public API and an MCP endpoint.
+      </p>
+      <div class="cta-row">
+        <a class="btn btn-primary" data-menu-url href="https://laparku-menus.workers.dev">
+          Browse the menus <span aria-hidden="true">→</span>
+        </a>
+        <a class="btn btn-ghost" href="https://github.com/Qoyyuum/laparku-menus" rel="noopener">
+          Contribute on GitHub
+        </a>
+      </div>
+    </section>
+
+    <section class="container section" aria-labelledby="what-heading">
+      <h2 id="what-heading">What is laparku?</h2>
+      <div class="grid grid-3">
+        <article class="card">
+          <div class="card-icon" aria-hidden="true">🍽️</div>
+          <h3>Menus &amp; products</h3>
+          <p>
+            Dishes, drinks and grocery items from restaurants, stalls, supermarkets
+            and grocers across Brunei — names, prices and details contributed by the
+            community and kept searchable.
+          </p>
+        </article>
+        <article class="card">
+          <div class="card-icon" aria-hidden="true">🔌</div>
+          <h3>Open API &amp; MCP</h3>
+          <p>
+            Query the dataset over a public HTTP API, or plug it straight into your
+            AI agent via the MCP endpoint. Build apps, bots and analyses on open data.
+          </p>
+        </article>
+        <article class="card">
+          <div class="card-icon" aria-hidden="true">🥗</div>
+          <h3>Healthier eating</h3>
+          <p>
+            A healthy-eating initiative at heart: when what's in your food — and what
+            it costs — is open data, everyone can make better choices.
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <section class="container section" aria-labelledby="soon-heading">
+      <h2 id="soon-heading">Coming soon</h2>
+      <div class="grid grid-2">
+        <article class="card card-soon">
+          <span class="badge">Coming soon</span>
+          <div class="card-icon" aria-hidden="true">🧺</div>
+          <h3>laparku pantry</h3>
+          <p>
+            Track what's in your pantry, plan meals around what you already have,
+            and cut food waste — fed by the same open dataset.
+          </p>
+        </article>
+        <article class="card card-soon">
+          <span class="badge">Coming soon</span>
+          <div class="card-icon" aria-hidden="true">🌱</div>
+          <h3>Vertical farming</h3>
+          <p>
+            A sister project exploring local vertical farming — fresher produce,
+            grown closer to home.
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <section class="support-band">
+      <div class="container support-inner">
+        <h2>Help build the dataset</h2>
+        <p>
+          Snap a menu, submit it, review a neighbour's entry — every contribution
+          makes the data better for everyone. And if laparku has been useful to you,
+          a coffee keeps the servers warm.
+        </p>
+        <div class="cta-row">
+          <a class="btn btn-light" href="https://github.com/Qoyyuum/laparku-menus" rel="noopener">
+            Contribute on GitHub
+          </a>
+          <a class="btn btn-outline-light" href="https://buymeacoffee.com/qoyyuum" rel="noopener">
+            <span aria-hidden="true">☕</span> Buy me a coffee
+          </a>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <p>laparku — a community project from Brunei Darussalam.</p>
+      <p>
+        <a href="https://github.com/Qoyyuum/laparku-menus" rel="noopener">Source on GitHub</a>
+        · <a href="https://buymeacoffee.com/qoyyuum" rel="noopener">Support</a>
+      </p>
+    </div>
+  </footer>
+
+  <script>
+    // Apply the single-source menu app URL from <meta name="menu-url">.
+    // Fallback hrefs in the anchors keep links working without JS.
+    (function () {
+      var meta = document.querySelector('meta[name="menu-url"]');
+      if (!meta || !meta.content) return;
+      document.querySelectorAll('[data-menu-url]').forEach(function (a) {
+        a.setAttribute('href', meta.content);
+      });
+    })();
+  </script>
+</body>
+</html>
