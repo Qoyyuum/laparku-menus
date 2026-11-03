@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { getDb } from "../db/client";
 import { food_items, item_flags, SUBMISSION_STATUSES, submissions, submitters, venues } from "../db/schema";
 import type { Env } from "../env";
+import { listStaleVenues } from "../lib/freshness";
 import { PublishError, publishSubmission, rejectSubmission, type PublishEdits } from "../lib/publish";
 import { requireAuth, type AuthVariables } from "../middleware/auth";
 
@@ -143,6 +144,16 @@ adminApi.get("/images/*", async (c) => {
       "x-content-type-options": "nosniff",
     },
   });
+});
+
+// GET /api/admin/stale — venues whose freshness needs a reviewer's eye:
+// never verified, verified longer than STALE_MONTHS ago, or carrying
+// STALE_NO_VOTES+ distinct "not accurate" votes since the last positive
+// verification. List-only: surfacing here never changes a venue's status —
+// reviewers decide what to do with the flag.
+adminApi.get("/stale", async (c) => {
+  const rows = await listStaleVenues(getDb(c.env), c.env);
+  return c.json({ venues: rows });
 });
 
 // GET /api/admin/venues/:id/items — the venue's CURRENT menu (is_current),

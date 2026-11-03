@@ -26,4 +26,24 @@ CREATE TABLE `venue_revisions` (
 	FOREIGN KEY (`submission_id`) REFERENCES `submissions`(`id`) ON UPDATE no action ON DELETE no action
 );--> statement-breakpoint
 CREATE INDEX `venue_revisions_venue_idx` ON `venue_revisions` (`venue_id`);--> statement-breakpoint
-CREATE INDEX `venue_revisions_submission_idx` ON `venue_revisions` (`submission_id`);
+CREATE INDEX `venue_revisions_submission_idx` ON `venue_revisions` (`submission_id`);--> statement-breakpoint
+
+-- Task 3 (freshness): `venues.last_verified_at` is set on every approved
+-- publish and on each positive verify vote; NULL = never verified (v1-era
+-- venues). `verifications` records "is this menu still current?" votes —
+-- one row per user per venue per UTC day, enforced by the UNIQUE expression
+-- index below on date(created_at) (created_at is epoch-ms, hence /1000).
+-- Both the expression index and the plain-text user_id (no FK into the
+-- untracked "user" table) follow this file's hand-folded convention.
+ALTER TABLE `venues` ADD `last_verified_at` integer;--> statement-breakpoint
+CREATE TABLE `verifications` (
+	`id` text PRIMARY KEY NOT NULL,
+	`venue_id` text NOT NULL,
+	`user_id` text NOT NULL,
+	`accurate` integer NOT NULL,
+	`created_at` integer NOT NULL,
+	FOREIGN KEY (`venue_id`) REFERENCES `venues`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE INDEX `verifications_venue_idx` ON `verifications` (`venue_id`);--> statement-breakpoint
+CREATE INDEX `verifications_user_idx` ON `verifications` (`user_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `verifications_daily_idx` ON `verifications` (`venue_id`, `user_id`, date(`created_at` / 1000, 'unixepoch'));

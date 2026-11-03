@@ -60,6 +60,10 @@ export const venues = sqliteTable("venues", {
   halal_status: text("halal_status", { enum: HALAL_STATUSES }).notNull().default("unknown"),
   verification: text("verification", { enum: VENUE_VERIFICATIONS }).notNull().default("unverified"),
   status: text("status", { enum: ["published", "draft", "closed"] }).notNull().default("published"),
+  // Freshness signal: bumped on every approved publish and on each positive
+  // ("accurate") verify vote. NULL means never verified — v1-era venues and
+  // direct seeds — which reads as fully stale.
+  last_verified_at: integer("last_verified_at", { mode: "timestamp_ms" }),
   created_at: createdAt(),
   updated_at: updatedAt(),
 });
@@ -199,6 +203,30 @@ export const venue_revisions = sqliteTable(
   ],
 );
 
+// One "is this menu still current?" vote per user per venue per UTC day —
+// the day-scoping is enforced by a UNIQUE expression index on
+// date(created_at) in migrations/0002_phase2.sql (hand-added, same
+// convention as the auth-table FKs: drizzle can't express it). Votes feed
+// the admin staleness list; `accurate=true` also bumps
+// venues.last_verified_at. user_id follows the auth convention — plain
+// text, no drizzle-level FK into the untracked "user" table.
+export const verifications = sqliteTable(
+  "verifications",
+  {
+    id: id(),
+    venue_id: text("venue_id")
+      .notNull()
+      .references(() => venues.id),
+    user_id: text("user_id").notNull(),
+    accurate: integer("accurate", { mode: "boolean" }).notNull(),
+    created_at: createdAt(),
+  },
+  (t) => [
+    index("verifications_venue_idx").on(t.venue_id),
+    index("verifications_user_idx").on(t.user_id),
+  ],
+);
+
 export const item_flags = sqliteTable(
   "item_flags",
   {
@@ -227,4 +255,6 @@ export type ItemFlag = typeof item_flags.$inferSelect;
 export type NewItemFlag = typeof item_flags.$inferInsert;
 export type VenueRevision = typeof venue_revisions.$inferSelect;
 export type NewVenueRevision = typeof venue_revisions.$inferInsert;
+export type Verification = typeof verifications.$inferSelect;
+export type NewVerification = typeof verifications.$inferInsert;
 export type RevisionMode = (typeof REVISION_MODES)[number];

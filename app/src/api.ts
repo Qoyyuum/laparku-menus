@@ -59,6 +59,10 @@ export interface Venue {
   website: string | null;
   halal_status: (typeof HALAL_STATUSES)[number];
   verification: "unverified" | "verified" | "claimed-by-owner";
+  // Derived on the worker from last_verified_at vs STALE_MONTHS
+  // (src/lib/freshness.ts): <3mo fresh, <6mo aging, otherwise stale.
+  freshness?: "fresh" | "aging" | "stale";
+  last_verified_at?: number | null;
 }
 
 export interface FoodItem {

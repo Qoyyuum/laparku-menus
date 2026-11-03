@@ -10,6 +10,11 @@ PUBLIC_BASE_URL = "http://localhost:8787"
 # ("workers-ai" in production; tests override EXTRACTOR with "stub").
 EXTRACTION_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct"
 EXTRACTOR = "workers-ai"
+# Freshness: a venue surfaces on the admin staleness list when unverified
+# for STALE_MONTHS (or never verified) or when STALE_NO_VOTES distinct
+# users vote "not accurate" since the last verification.
+STALE_MONTHS = "6"
+STALE_NO_VOTES = "3"
 
 [[d1_databases]]
 binding = "DB"

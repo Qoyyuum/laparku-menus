@@ -250,8 +250,21 @@ export async function publishSubmission(
   }
 
   let venue: { id: string; created: boolean } | undefined;
+  let prevVerifiedAt: Date | null | undefined;
   try {
     venue = await resolveVenue(db, edits);
+    // Approving a menu is itself a verification event — the reviewer just
+    // confirmed the items are current — so publish bumps
+    // venues.last_verified_at (same signal as a positive verify vote).
+    // The prior value is kept for the rollback below.
+    const [prior] = await db
+      .select({ at: venues.last_verified_at })
+      .from(venues)
+      .where(eq(venues.id, venue.id))
+      .limit(1);
+    prevVerifiedAt = prior?.at ?? null;
+    await db.update(venues).set({ last_verified_at: new Date() }).where(eq(venues.id, venue.id));
+
     // TODO(p2-task-6): stub + venue_request linkage — once those tables
     // land, approving onto a stub venue must clear venues.is_stub and mark
     // the matching open venue_request fulfilled. venue.id + submissionId
@@ -360,6 +373,14 @@ export async function publishSubmission(
     await clearRevisionsForSubmission(db, submissionId);
     if (venue?.created) {
       await db.delete(venues).where(eq(venues.id, venue.id));
+    } else if (venue && prevVerifiedAt !== undefined) {
+      // Undo the verification bump — a failed publish vouches for nothing.
+      // prevVerifiedAt stays undefined if the bump never ran (the select
+      // above threw), in which case the stored value is already correct.
+      await db
+        .update(venues)
+        .set({ last_verified_at: prevVerifiedAt })
+        .where(eq(venues.id, venue.id));
     }
     await db
       .update(submissions)

@@ -15,4 +15,10 @@ export interface Env {
   // From-address for magic-link emails (optional [vars]; falls back to a
   // no-reply@laparku.com default in src/auth.ts).
   AUTH_EMAIL_FROM?: string;
+  // Freshness thresholds ([vars], parsed in src/lib/freshness.ts): a venue
+  // is stale when last verified more than STALE_MONTHS ago (or never
+  // verified), or when STALE_NO_VOTES distinct users vote "not accurate"
+  // since the last verification. Defaults 6 / 3 when unset or unparsable.
+  STALE_MONTHS?: string;
+  STALE_NO_VOTES?: string;
 }

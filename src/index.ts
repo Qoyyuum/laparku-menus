@@ -7,6 +7,7 @@ import adminApi from "./routes/admin";
 import flagsApi from "./routes/flags";
 import publicApi from "./routes/public";
 import submissionsApi from "./routes/submissions";
+import verifyApi from "./routes/verify";
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -17,6 +18,7 @@ app.on(["GET", "POST"], "/api/auth/*", (c) => createAuth(c.env).handler(c.req.ra
 app.route("/api", publicApi);
 app.route("/api", submissionsApi);
 app.route("/api", flagsApi);
+app.route("/api", verifyApi);
 app.route("/api/admin", adminApi);
 
 export default {

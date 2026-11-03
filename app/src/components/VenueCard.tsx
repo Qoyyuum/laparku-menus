@@ -18,6 +18,7 @@ export function VenueCard({ venue }: { venue: Venue }) {
           area: venue.area,
           halal_status: venue.halal_status,
           verification: venue.verification,
+          freshness: venue.freshness,
         },
       }}
       asChild

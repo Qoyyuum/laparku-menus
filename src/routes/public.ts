@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { getDb } from "../db/client";
 import { AREAS, food_items, HALAL_STATUSES, ITEM_TYPES, venues, VENUE_TYPES } from "../db/schema";
 import type { Env } from "../env";
+import { staleMonths, withFreshness } from "../lib/freshness";
 
 // Cap rows returned by a single public request.
 const LIMIT = 100;
@@ -59,11 +60,15 @@ export interface PublicVenueFilters extends VenueFilters {
 export async function listPublishedVenues(env: Env, f: PublicVenueFilters) {
   const conds = venueConds(f);
   if (f.q) conds.push(venueNameMatch(f.q));
-  return getDb(env)
+  const rows = await getDb(env)
     .select()
     .from(venues)
     .where(and(...conds))
     .limit(LIMIT);
+  // Every venue row carries the derived freshness badge (fresh/aging/stale
+  // from last_verified_at vs STALE_MONTHS — see src/lib/freshness.ts).
+  const months = staleMonths(env);
+  return rows.map((v) => withFreshness(v, months));
 }
 
 // Null when the venue doesn't exist or isn't published — callers decide the
@@ -129,7 +134,8 @@ export async function searchPublic(env: Env, f: PublicSearchFilters) {
     .where(and(...iConds))
     .limit(LIMIT);
 
-  return { venues: venueRows, items: itemRows.map((r) => r.item) };
+  const months = staleMonths(env);
+  return { venues: venueRows.map((v) => withFreshness(v, months)), items: itemRows.map((r) => r.item) };
 }
 
 // --- routes ---------------------------------------------------------------
