@@ -339,7 +339,11 @@ function ReviewForm({ id }: { id: string }) {
             <View className="gap-2">
               <Pressable
                 className="items-center rounded-lg bg-emerald-700 px-4 py-3 disabled:opacity-50"
-                disabled={busy !== null || (!existingVenue && venueName.trim() === "")}
+                disabled={
+                  busy !== null ||
+                  (!existingVenue && venueName.trim() === "") ||
+                  items.every((i) => i.name.trim() === "")
+                }
                 onPress={() => decide("approve")}
               >
                 <Text className="text-base font-semibold text-white">

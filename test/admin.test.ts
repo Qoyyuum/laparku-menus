@@ -1,11 +1,29 @@
 import { env, SELF } from "cloudflare:test";
 import { and, eq, isNull } from "drizzle-orm";
 import { expect, it } from "vitest";
-import { getDb } from "../src/db/client";
+import { getDb, type Db } from "../src/db/client";
 import { food_items, submissions, submitters, venues } from "../src/db/schema";
+import { publishSubmission } from "../src/lib/publish";
 import { forgeSession } from "./helpers/auth";
 
 const db = () => getDb(env);
+
+// Wraps the real drizzle db so `insert(food_items)` throws — simulating a
+// failure after the venue was resolved and the old menu superseded.
+function failingInsertDb(): Db {
+  const real = db();
+  return new Proxy(real, {
+    get(target, prop, receiver) {
+      if (prop === "insert") {
+        return (table: unknown) => {
+          if (table === food_items) throw new Error("simulated D1 failure");
+          return (target.insert as (t: unknown) => unknown).call(target, table);
+        };
+      }
+      return Reflect.get(target, prop, receiver);
+    },
+  }) as Db;
+}
 
 interface SeedSubOpts {
   status?: (typeof submissions.$inferInsert)["status"];
@@ -97,7 +115,7 @@ it("admin endpoints reject non-reviewers: 401 anonymous, 403 submitter", async (
 
   const { cookie: submitter } = await forgeSession("submitter");
   expect((await SELF.fetch("https://x/api/admin/submissions", { headers: { cookie: submitter } })).status).toBe(403);
-  expect((await approve(sub.id, submitter, { items: [] })).status).toBe(403);
+  expect((await approve(sub.id, submitter, { items: [{ name: "X", item_type: "dish" }] })).status).toBe(403);
   expect((await reject(sub.id, submitter, { reason: "nope" })).status).toBe(403);
   expect((await SELF.fetch(`https://x/api/admin/images/submissions/${sub.id}/0`, { headers: { cookie: submitter } })).status).toBe(403);
 });
@@ -195,7 +213,9 @@ it("approve rejects malformed bodies and decided submissions", async () => {
   // No venue at all — nowhere to publish to.
   expect((await approve(sub.id, cookie, { items: [{ name: "X", item_type: "dish" }] })).status).toBe(400);
   // Unknown existing venue id.
-  expect((await approve(sub.id, cookie, { venue_id: crypto.randomUUID(), items: [] })).status).toBe(404);
+  expect(
+    (await approve(sub.id, cookie, { venue_id: crypto.randomUUID(), items: [{ name: "X", item_type: "dish" }] })).status,
+  ).toBe(404);
 
   const res = await approve(sub.id, cookie, {
     venue: { name: "V", type: "stall", area: "Tutong" },
@@ -203,7 +223,109 @@ it("approve rejects malformed bodies and decided submissions", async () => {
   });
   expect(res.status).toBe(200);
   // Second decision on the same submission → 409, no double-publish.
-  expect((await approve(sub.id, cookie, { venue: { name: "V2", type: "stall", area: "Tutong" }, items: [] })).status).toBe(409);
+  expect(
+    (
+      await approve(sub.id, cookie, {
+        venue: { name: "V2", type: "stall", area: "Tutong" },
+        items: [{ name: "Y", item_type: "dish" }],
+      })
+    ).status,
+  ).toBe(409);
+});
+
+it("approve with empty items is rejected without touching the venue's menu", async () => {
+  const { cookie } = await forgeSession("reviewer");
+
+  // Existing venue with a live item.
+  const first = await seedSubmission();
+  const res1 = await approve(first.id, cookie, {
+    venue: { name: "Has Menu", type: "restaurant", area: "Belait" },
+    items: [{ name: "Live Dish", price_bnd: 3.0, item_type: "dish" }],
+  });
+  const { venue_id } = (await res1.json()) as { venue_id: string };
+
+  // Approving zero items must NOT wipe the live menu nor create an empty venue.
+  const second = await seedSubmission();
+  expect((await approve(second.id, cookie, { venue_id, items: [] })).status).toBe(400);
+  const third = await seedSubmission();
+  expect(
+    (
+      await approve(third.id, cookie, {
+        venue: { name: "Empty Venue", type: "stall", area: "Tutong" },
+        items: [],
+      })
+    ).status,
+  ).toBe(400);
+
+  // Live menu untouched; no empty venue created; both rows still reviewable.
+  const { items } = (await (await SELF.fetch(`https://x/api/venues/${venue_id}/items`)).json()) as {
+    items: { name: string }[];
+  };
+  expect(items.map((i) => i.name)).toEqual(["Live Dish"]);
+  const emptyVenue = await db().select().from(venues).where(eq(venues.name, "Empty Venue"));
+  expect(emptyVenue).toHaveLength(0);
+  for (const id of [second.id, third.id]) {
+    const [row] = await db().select().from(submissions).where(eq(submissions.id, id));
+    expect(row?.status).toBe("pending_review");
+  }
+});
+
+it("a mid-publish failure leaves no orphan venue and restores the venue's live menu", async () => {
+  const { cookie } = await forgeSession("reviewer");
+
+  // Venue with a live menu, via a first successful approve.
+  const first = await seedSubmission();
+  const res1 = await approve(first.id, cookie, {
+    venue: { name: "Rollback Resto", type: "restaurant", area: "Tutong" },
+    items: [{ name: "Existing Dish", price_bnd: 4.0, item_type: "dish" }],
+  });
+  const { venue_id } = (await res1.json()) as { venue_id: string };
+  const venuesBefore = (await db().select().from(venues)).length;
+
+  // Simulate a D1 failure at the items-insert step: the claim + supersede
+  // already happened. Rollback must un-supersede and re-pend the submission.
+  const second = await seedSubmission();
+  await expect(
+    publishSubmission(failingInsertDb(), second.id, "test-reviewer", {
+      venue_id,
+      items: [{ name: "Replacement", price_bnd: 5.0, item_type: "dish" }],
+    }),
+  ).rejects.toThrow("simulated D1 failure");
+
+  const [rolledBack] = await db().select().from(submissions).where(eq(submissions.id, second.id));
+  expect(rolledBack?.status).toBe("pending_review");
+  const live = await db()
+    .select()
+    .from(food_items)
+    .where(and(eq(food_items.venue_id, venue_id), eq(food_items.status, "published"), isNull(food_items.superseded_by)));
+  expect(live.map((i) => i.name)).toEqual(["Existing Dish"]);
+  // Public API still shows the old menu.
+  const { items } = (await (await SELF.fetch(`https://x/api/venues/${venue_id}/items`)).json()) as {
+    items: { name: string }[];
+  };
+  expect(items.map((i) => i.name)).toEqual(["Existing Dish"]);
+
+  // A venue-draft publish that fails must not leave a new published venue
+  // behind — and a retry must not create a duplicate.
+  const third = await seedSubmission();
+  await expect(
+    publishSubmission(failingInsertDb(), third.id, "test-reviewer", {
+      venue: { name: "Orphan Venue", type: "stall", area: "Belait" },
+      items: [{ name: "X", item_type: "dish" }],
+    }),
+  ).rejects.toThrow("simulated D1 failure");
+  expect(await db().select().from(venues).where(eq(venues.name, "Orphan Venue"))).toHaveLength(0);
+  const [thirdRow] = await db().select().from(submissions).where(eq(submissions.id, third.id));
+  expect(thirdRow?.status).toBe("pending_review");
+
+  // Retry through the real route — succeeds, exactly one venue created.
+  const res3 = await approve(third.id, cookie, {
+    venue: { name: "Orphan Venue", type: "stall", area: "Belait" },
+    items: [{ name: "X", price_bnd: 1, item_type: "dish" }],
+  });
+  expect(res3.status).toBe(200);
+  expect(await db().select().from(venues).where(eq(venues.name, "Orphan Venue"))).toHaveLength(1);
+  expect((await db().select().from(venues)).length).toBe(venuesBefore + 1);
 });
 
 // --- reject -----------------------------------------------------------------

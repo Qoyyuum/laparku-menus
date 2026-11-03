@@ -49,7 +49,8 @@ export async function adminFetch<T = unknown>(path: string, init?: RequestInit):
   if (Platform.OS !== "web" && API_BASE.startsWith("/")) {
     throw new AdminApiError(0, "EXPO_PUBLIC_API_URL is not set — native builds need the deployed worker API URL.");
   }
-  const headers: Record<string, string> = { "content-type": "application/json" };
+  const headers: Record<string, string> = {};
+  if (init?.body != null) headers["content-type"] = "application/json";
   if (init?.headers) {
     for (const [k, v] of Object.entries(init.headers as Record<string, string>)) headers[k] = v;
   }

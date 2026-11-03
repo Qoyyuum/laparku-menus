@@ -1,3 +1,4 @@
+import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import { useState } from "react";
 import { Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
@@ -18,23 +19,55 @@ const SOURCE_LABELS: Record<string, string> = {
   url: "Web link",
 };
 
-type Picked = ImagePicker.ImagePickerAsset;
-
-function fileName(asset: Picked, i: number): string {
-  return asset.fileName ?? `upload-${i}.jpg`;
+// Normalized picked file — image-picker and document-picker assets collapse
+// to the fields the upload needs.
+interface PickedFile {
+  uri: string;
+  name: string;
+  mimeType?: string;
+  file?: File; // web only — avoids a second fetch of the blob
 }
 
 export default function SubmitScreen() {
   const [sourceType, setSourceType] = useState<(typeof PICKABLE_SOURCE_TYPES)[number]>("menu_photo");
   const [provenance, setProvenance] = useState("");
   const [email, setEmail] = useState("");
-  const [files, setFiles] = useState<Picked[]>([]);
+  const [files, setFiles] = useState<PickedFile[]>([]);
   const [turnstileToken, setTurnstileToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function pick(fromCamera: boolean) {
+    setError(null);
+    // PDF menus come through the document picker — the image picker can't
+    // select them.
+    if (sourceType === "menu_pdf") {
+      const res = await DocumentPicker.getDocumentAsync({ type: "application/pdf", multiple: true });
+      if (!res.canceled) {
+        setFiles((prev) =>
+          [
+            ...prev,
+            ...res.assets.map((a) => ({
+              uri: a.uri,
+              name: a.name ?? "menu.pdf",
+              mimeType: a.mimeType ?? "application/pdf",
+              file: a.file,
+            })),
+          ].slice(0, MAX_FILES),
+        );
+      }
+      return;
+    }
+    if (fromCamera) {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) {
+        setError(
+          "Camera access is needed to photograph a menu — allow it in your device settings, or choose photos from the gallery instead.",
+        );
+        return;
+      }
+    }
     const opts: ImagePicker.ImagePickerOptions = {
       mediaTypes: ["images"],
       quality: 0.85,
@@ -44,22 +77,33 @@ export default function SubmitScreen() {
     const res = fromCamera
       ? await ImagePicker.launchCameraAsync(opts)
       : await ImagePicker.launchImageLibraryAsync(opts);
-    if (!res.canceled) setFiles((prev) => [...prev, ...res.assets].slice(0, MAX_FILES));
+    if (!res.canceled) {
+      setFiles((prev) =>
+        [
+          ...prev,
+          ...res.assets.map((a, i) => ({
+            uri: a.uri,
+            name: a.fileName ?? `photo-${i}.jpg`,
+            mimeType: a.mimeType,
+            file: a.file,
+          })),
+        ].slice(0, MAX_FILES),
+      );
+    }
   }
 
   // FormData wants platform-specific file parts: RN's {uri,name,type} object
   // on native, a real Blob/File on web.
   async function appendFiles(form: FormData) {
-    for (let i = 0; i < files.length; i++) {
-      const asset = files[i]!;
+    for (const f of files) {
       if (Platform.OS === "web") {
-        const blob = asset.file ?? (await (await fetch(asset.uri)).blob());
-        form.append("files", blob, fileName(asset, i));
+        const blob = f.file ?? (await (await fetch(f.uri)).blob());
+        form.append("files", blob, f.name);
       } else {
         form.append("files", {
-          uri: asset.uri,
-          name: fileName(asset, i),
-          type: asset.mimeType ?? "image/jpeg",
+          uri: f.uri,
+          name: f.name,
+          type: f.mimeType ?? "image/jpeg",
         } as unknown as Blob);
       }
     }
@@ -135,16 +179,19 @@ export default function SubmitScreen() {
 
       <View className="gap-1.5">
         <Text className="text-sm font-semibold text-neutral-800">
-          Photos {needsFiles ? "(at least one required)" : "(optional)"}
+          {sourceType === "menu_pdf" ? "PDF files" : "Photos"}{" "}
+          {needsFiles ? "(at least one required)" : "(optional)"}
         </Text>
         <View className="flex-row gap-2">
           <Pressable
             className="rounded-lg border border-neutral-300 bg-white px-3 py-2"
             onPress={() => pick(false)}
           >
-            <Text className="text-sm font-medium text-neutral-800">Choose photos</Text>
+            <Text className="text-sm font-medium text-neutral-800">
+              {sourceType === "menu_pdf" ? "Choose PDF files" : "Choose photos"}
+            </Text>
           </Pressable>
-          {Platform.OS !== "web" ? (
+          {Platform.OS !== "web" && sourceType !== "menu_pdf" ? (
             <Pressable
               className="rounded-lg border border-neutral-300 bg-white px-3 py-2"
               onPress={() => pick(true)}
@@ -193,7 +240,7 @@ export default function SubmitScreen() {
       </View>
 
       {Platform.OS === "web" && TURNSTILE_SITEKEY !== "" ? (
-        <Turnstile siteKey={TURNSTILE_SITEKEY} onToken={setTurnstileToken} />
+        <Turnstile siteKey={TURNSTILE_SITEKEY} onToken={setTurnstileToken} onError={setError} />
       ) : null}
 
       {error ? <Text className="text-sm text-red-600">{error}</Text> : null}

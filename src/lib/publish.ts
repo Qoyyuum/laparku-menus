@@ -64,6 +64,12 @@ function oneOf<const T extends readonly string[]>(v: unknown, allowed: T): T[num
 // guarantee.
 function validateItems(items: unknown): DraftItem[] {
   if (!Array.isArray(items)) throw new PublishError(400, "items must be an array");
+  // An empty approve would silently supersede every live item (venue_id) or
+  // create a permanently-empty published venue (draft). Emptying a menu is
+  // not a supported action — reject with a different submission or flag it.
+  if (items.length === 0) {
+    throw new PublishError(400, "items must contain at least one item");
+  }
   return items.map((raw, i) => {
     if (typeof raw !== "object" || raw === null) {
       throw new PublishError(400, `items[${i}] must be an object`);
@@ -86,14 +92,15 @@ function validateItems(items: unknown): DraftItem[] {
 
 // Resolves the publish target: an existing venue (venue_id) or a new row
 // created from the reviewer's draft. venue_id wins when both are present —
-// the draft is then treated as stale UI state, not applied.
-async function resolveVenue(db: Db, edits: PublishEdits): Promise<string> {
+// the draft is then treated as stale UI state, not applied. `created` marks
+// rows this call inserted so a mid-publish rollback can remove them.
+async function resolveVenue(db: Db, edits: PublishEdits): Promise<{ id: string; created: boolean }> {
   if (edits.venue_id !== undefined) {
     const id = str(edits.venue_id);
     if (!id) throw new PublishError(400, "venue_id must be a non-empty string");
     const [venue] = await db.select({ id: venues.id }).from(venues).where(eq(venues.id, id)).limit(1);
     if (!venue) throw new PublishError(404, "venue not found");
-    return venue.id;
+    return { id: venue.id, created: false };
   }
   if (!edits.venue) {
     throw new PublishError(400, "provide venue_id (existing venue) or venue (new venue draft)");
@@ -128,7 +135,7 @@ async function resolveVenue(db: Db, edits: PublishEdits): Promise<string> {
       status: "published",
     })
     .returning({ id: venues.id });
-  return venue!.id;
+  return { id: venue!.id, created: true };
 }
 
 async function loadSubmission(db: Db, submissionId: string): Promise<Submission> {
@@ -165,15 +172,16 @@ export async function publishSubmission(
     throw new PublishError(409, `submission is ${sub.status}, only pending_review can be decided`);
   }
 
+  let venue: { id: string; created: boolean } | undefined;
   try {
-    const venueId = await resolveVenue(db, edits);
+    venue = await resolveVenue(db, edits);
 
     const superseded = await db
       .update(food_items)
       .set({ superseded_by: submissionId, status: "superseded" })
       .where(
         and(
-          eq(food_items.venue_id, venueId),
+          eq(food_items.venue_id, venue.id),
           eq(food_items.status, "published"),
           isNull(food_items.superseded_by),
         ),
@@ -181,7 +189,7 @@ export async function publishSubmission(
       .returning({ id: food_items.id });
 
     const rows: NewFoodItem[] = items.map((item) => ({
-      venue_id: venueId,
+      venue_id: venue!.id,
       item_type: item.item_type,
       name: item.name,
       name_ms: str(item.name_ms) ?? null,
@@ -203,11 +211,19 @@ export async function publishSubmission(
         .where(eq(submitters.id, sub.submitter_id));
     }
 
-    return { venue_id: venueId, items_published: rows.length, items_superseded: superseded.length };
+    return { venue_id: venue.id, items_published: rows.length, items_superseded: superseded.length };
   } catch (e) {
-    // Roll the claim back — the venue/items published so far stay (the row
-    // is reviewable again), but the submission must not sit at `approved`
-    // when nothing was fully published.
+    // Undo everything this call did, newest first — otherwise a retry would
+    // leave an empty published venue, pile up duplicate venue rows, and keep
+    // the venue's real menu superseded in the meantime.
+    await db.delete(food_items).where(eq(food_items.source_submission_id, submissionId));
+    await db
+      .update(food_items)
+      .set({ superseded_by: null, status: "published" })
+      .where(eq(food_items.superseded_by, submissionId));
+    if (venue?.created) {
+      await db.delete(venues).where(eq(venues.id, venue.id));
+    }
     await db
       .update(submissions)
       .set({ status: "pending_review", reviewer_id: null })

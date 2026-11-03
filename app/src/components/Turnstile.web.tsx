@@ -50,11 +50,13 @@ function loadTurnstile(): Promise<void> {
 // Cloudflare Turnstile widget (web only). Renders explicitly into the View's
 // underlying DOM node so mounts after the script loads still work; calls
 // onToken with the token POST /api/submissions expects in `turnstile_token`.
-export function Turnstile({ siteKey, onToken }: TurnstileProps) {
+export function Turnstile({ siteKey, onToken, onError }: TurnstileProps) {
   // On react-native-web a View ref is the rendered DOM element.
   const ref = useRef<ComponentRef<typeof View> | null>(null);
   const onTokenRef = useRef(onToken);
   onTokenRef.current = onToken;
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
 
   useEffect(() => {
     let widgetId: string | undefined;
@@ -65,9 +67,15 @@ export function Turnstile({ siteKey, onToken }: TurnstileProps) {
         widgetId = browser.turnstile.render(ref.current, {
           sitekey: siteKey,
           callback: (token) => onTokenRef.current(token),
+          "error-callback": () =>
+            onErrorRef.current?.("Spam check failed — reload the page and try again."),
         });
       })
-      .catch(() => {});
+      .catch(() => {
+        onErrorRef.current?.(
+          "Spam check (Turnstile) failed to load — check your connection or ad blocker, then reload.",
+        );
+      });
     return () => {
       cancelled = true;
       if (widgetId && browser.turnstile) browser.turnstile.remove(widgetId);
