@@ -12,4 +12,7 @@ export interface Env {
   TURNSTILE_SECRET_KEY: string;
   BETTER_AUTH_SECRET: string;
   RESEND_API_KEY: string;
+  // From-address for magic-link emails (optional [vars]; falls back to a
+  // no-reply@laparku.com default in src/auth.ts).
+  AUTH_EMAIL_FROM?: string;
 }

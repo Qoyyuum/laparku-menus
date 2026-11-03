@@ -4,6 +4,7 @@ compatibility_date = "2026-08-22"
 compatibility_flags = ["nodejs_compat"]
 
 [vars]
+# Doubles as the better-auth baseURL — magic links are built against it.
 PUBLIC_BASE_URL = "http://localhost:8787"
 # Extraction pipeline: Workers AI vision model + provider selector
 # ("workers-ai" in production; tests override EXTRACTOR with "stub").

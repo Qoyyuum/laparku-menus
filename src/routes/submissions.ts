@@ -1,5 +1,6 @@
 import { eq, sql } from "drizzle-orm";
 import { Hono, type Context } from "hono";
+import { createAuth } from "../auth";
 import { getDb } from "../db/client";
 import { SOURCE_TYPES, submissions, submitters, type Submitter } from "../db/schema";
 import type { Env } from "../env";
@@ -8,11 +9,12 @@ import { verifyTurnstile } from "../lib/turnstile";
 
 type AppContext = Context<{ Bindings: Env }>;
 
-// TODO(Task 8): replace this stub with the real better-auth session lookup.
-// Returning null keeps `manual_entry` behind a 401 until auth lands — the
-// spec requires an authenticated session for text-only submissions.
-async function getSession(_c: AppContext): Promise<{ userId: string; email?: string } | null> {
-  return null;
+// Real better-auth session lookup (Task 8) — the signed session cookie is
+// checked against the auth tables; any authenticated role may file a
+// manual_entry submission.
+async function getSession(c: AppContext): Promise<{ userId: string; email?: string } | null> {
+  const session = await createAuth(c.env).api.getSession({ headers: c.req.raw.headers });
+  return session ? { userId: session.user.id, email: session.user.email } : null;
 }
 
 function str(v: unknown): string | undefined {
