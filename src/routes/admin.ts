@@ -155,13 +155,21 @@ adminApi.get("/venues/:id/items", async (c) => {
     .where(eq(venues.id, c.req.param("id")))
     .limit(1);
   if (!venue) return c.json({ error: "venue not found" }, 404);
+  // Cap the picker page at 500 rows. A larger current menu would be
+  // silently truncated — and in merge mode unpicked items get superseded —
+  // so `truncated`/`total` let the review screen warn instead of the
+  // reviewer unknowingly dropping the tail of a giant menu.
   const items = await db
     .select()
     .from(food_items)
     .where(and(eq(food_items.venue_id, venue.id), eq(food_items.is_current, true)))
     .orderBy(asc(food_items.name))
     .limit(500);
-  return c.json({ items });
+  const [countRow] = await db
+    .select({ total: sql<number>`count(*)` })
+    .from(food_items)
+    .where(and(eq(food_items.venue_id, venue.id), eq(food_items.is_current, true)));
+  return c.json({ items, total: countRow?.total ?? items.length, truncated: items.length < (countRow?.total ?? 0) });
 });
 
 // POST /api/admin/submissions/:id/approve — publish the reviewer-edited

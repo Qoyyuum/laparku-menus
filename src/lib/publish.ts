@@ -1,4 +1,4 @@
-import { and, eq, notInArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
 import {
   AREAS,
@@ -257,33 +257,49 @@ export async function publishSubmission(
     // the matching open venue_request fulfilled. venue.id + submissionId
     // here are the hook point.
 
-    // Every {source:"existing"} selection must name a currently-live item
-    // of THIS venue — otherwise a reviewer could "keep" (or leak) an item
-    // from a different venue, or keep a row that's already dead.
-    if (selection.existingIds.length > 0) {
-      const current = await db
-        .select({ id: food_items.id })
-        .from(food_items)
-        .where(and(eq(food_items.venue_id, venue.id), eq(food_items.is_current, true)));
-      const currentIds = new Set(current.map((i) => i.id));
-      const bad = selection.existingIds.find((id) => !currentIds.has(id));
-      if (bad) {
-        throw new PublishError(400, `items: item ${bad} is not a current item of this venue`);
-      }
+    // Load the venue's current menu once: the {source:"existing"} selection
+    // must name only items in this set (no keeping another venue's item, no
+    // resurrecting a dead row) — and its complement is the drop set below.
+    const current = await db
+      .select({ id: food_items.id })
+      .from(food_items)
+      .where(
+        and(
+          eq(food_items.venue_id, venue.id),
+          eq(food_items.is_current, true),
+          eq(food_items.status, "published"),
+        ),
+      );
+    const keepIds = new Set(selection.existingIds);
+    const bad = selection.existingIds.find((id) => !current.some((i) => i.id === id));
+    if (bad) {
+      throw new PublishError(400, `items: item ${bad} is not a current item of this venue`);
     }
 
-    // Drop the current items the selection didn't keep. Under replace the
-    // keep-set is empty so this supersedes the whole old menu (v1).
-    const supersedeConds = [
-      eq(food_items.venue_id, venue.id),
-      eq(food_items.is_current, true),
-      ...(selection.existingIds.length > 0 ? [notInArray(food_items.id, selection.existingIds)] : []),
-    ];
-    const superseded = await db
-      .update(food_items)
-      .set({ superseded_by: submissionId, status: "superseded", is_current: false })
-      .where(and(...supersedeConds))
-      .returning({ id: food_items.id });
+    // Drop the current items the selection didn't keep — computed as an id
+    // set rather than a `NOT IN (keep-ids)` clause because D1 caps a query
+    // at ~100 bound parameters: a merge keeping ≥99 items (realistic for
+    // supermarket/grocer menus, exactly where merge matters) would have
+    // blown that cap binding one param per kept id. The UPDATE itself is
+    // chunked for the same reason (a replace on a large venue drops all).
+    const dropIds = current.map((i) => i.id).filter((id) => !keepIds.has(id));
+    let supersededCount = 0;
+    const DROP_CHUNK = 90; // + venue_id param stays under the 100-param cap
+    for (let off = 0; off < dropIds.length; off += DROP_CHUNK) {
+      const updated = await db
+        .update(food_items)
+        .set({ superseded_by: submissionId, status: "superseded", is_current: false })
+        .where(
+          and(
+            eq(food_items.venue_id, venue.id),
+            eq(food_items.is_current, true),
+            eq(food_items.status, "published"),
+            inArray(food_items.id, dropIds.slice(off, off + DROP_CHUNK)),
+          ),
+        )
+        .returning({ id: food_items.id });
+      supersededCount += updated.length;
+    }
 
     const rows: NewFoodItem[] = selection.drafts.map((item) => ({
       venue_id: venue!.id,
@@ -322,7 +338,7 @@ export async function publishSubmission(
       mode,
       items_published: rows.length,
       items_kept: selection.existingIds.length,
-      items_superseded: superseded.length,
+      items_superseded: supersededCount,
     };
   } catch (e) {
     // Undo everything this call did, newest first — otherwise a retry would

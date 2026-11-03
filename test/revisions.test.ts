@@ -198,6 +198,52 @@ it("Review Focus #1: merging a 3-item draft into a 40-item venue keeps 38 + adds
   expect(rev?.reviewer_id).toBe(userId);
 });
 
+it("a merge keeping >100 existing items stays under D1's bound-param cap", async () => {
+  // 120-item supermarket-scale menu: the keep list alone would overflow the
+  // ~100 bound-parameter cap if it were bound as a NOT IN (...) clause.
+  const { venue, items } = await seedVenueWithMenu(120, "Super");
+  const sub = await seedSubmission();
+  const { cookie } = await forgeSession("reviewer");
+
+  const kept = items.slice(0, 115);
+  const dropped = items.slice(115);
+  const res = await approve(sub.id, cookie, {
+    venue_id: venue.id,
+    mode: "merge",
+    items: [
+      ...kept.map((i) => ({ source: "existing", item_id: i.id })),
+      { source: "draft", draft_index: 0, name: "New Deli Item", price_bnd: 3.5, item_type: "dish" },
+    ],
+  });
+  expect(res.status).toBe(200);
+  const body = (await res.json()) as { items_published: number; items_kept: number; items_superseded: number };
+  expect(body).toMatchObject({ items_published: 1, items_kept: 115, items_superseded: 5 });
+
+  const live = await liveItems(venue.id);
+  expect(live).toHaveLength(116);
+  const liveIds = new Set(live.map((i) => i.id));
+  for (const k of kept) expect(liveIds.has(k.id)).toBe(true);
+  for (const d of dropped) expect(liveIds.has(d.id)).toBe(false);
+});
+
+it("a replace on a >100-item venue supersedes the whole menu", async () => {
+  const { venue } = await seedVenueWithMenu(120, "SuperReplace");
+  const sub = await seedSubmission();
+  const { cookie } = await forgeSession("reviewer");
+
+  const res = await approve(sub.id, cookie, {
+    venue_id: venue.id,
+    mode: "replace",
+    items: [{ source: "draft", draft_index: 0, name: "Only Dish", price_bnd: 2.0, item_type: "dish" }],
+  });
+  expect(res.status).toBe(200);
+  const body = (await res.json()) as { items_superseded: number };
+  expect(body.items_superseded).toBe(120);
+
+  const live = await liveItems(venue.id);
+  expect(live.map((i) => i.name)).toEqual(["Only Dish"]);
+});
+
 it("an existing item not selected stays readable via source_submission_id", async () => {
   const { venue, items, origin } = await seedVenueWithMenu(3);
   const sub = await seedSubmission();

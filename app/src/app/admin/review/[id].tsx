@@ -119,6 +119,7 @@ function ReviewForm({ id }: { id: string }) {
   // which draft rows get added (dropDrafts holds the EXCLUDED indices).
   const [mode, setMode] = useState<"replace" | "merge">("replace");
   const [existingItems, setExistingItems] = useState<FoodItem[]>([]);
+  const [menuTruncated, setMenuTruncated] = useState(false);
   const [keepIds, setKeepIds] = useState<Set<string>>(new Set());
   const [dropDrafts, setDropDrafts] = useState<Set<number>>(new Set());
   const [rejectReason, setRejectReason] = useState("");
@@ -151,16 +152,21 @@ function ReviewForm({ id }: { id: string }) {
     if (!existingVenue) {
       setExistingItems([]);
       setKeepIds(new Set());
+      setMenuTruncated(false);
       return;
     }
-    adminFetch<{ items: FoodItem[] }>(`/admin/venues/${existingVenue.id}/items`)
-      .then(({ items: rows }) => {
+    adminFetch<{ items: FoodItem[]; total: number; truncated: boolean }>(
+      `/admin/venues/${existingVenue.id}/items`,
+    )
+      .then(({ items: rows, total, truncated }) => {
         setExistingItems(rows);
         setKeepIds(new Set(rows.map((i) => i.id)));
+        setMenuTruncated(truncated || rows.length < total);
       })
       .catch(() => {
         setExistingItems([]);
         setKeepIds(new Set());
+        setMenuTruncated(false);
       });
   }, [existingVenue]);
 
@@ -392,6 +398,12 @@ function ReviewForm({ id }: { id: string }) {
               <Text className="text-sm font-semibold text-neutral-800">
                 Existing menu ({keepIds.size}/{existingItems.length} kept)
               </Text>
+              {menuTruncated ? (
+                <Text className="rounded bg-amber-50 p-2 text-xs font-medium text-amber-800">
+                  This menu has more items than shown — items not listed below would be superseded.
+                  Use Replace mode or split the merge.
+                </Text>
+              ) : null}
               {existingItems.length === 0 ? (
                 <Text className="text-xs text-neutral-500">This venue has no current items.</Text>
               ) : (
