@@ -3,7 +3,7 @@ import { Hono, type Context } from "hono";
 import { getDb } from "../db/client";
 import { SOURCE_TYPES, submissions, submitters, type Submitter } from "../db/schema";
 import type { Env } from "../env";
-import { MAX_FILE_BYTES, MAX_FILES, SNIFFED_MIME, sniffMagic, type SniffedFileType } from "../lib/files";
+import { MAX_FILE_BYTES, MAX_FILES, SNIFFED_MIME, sniffMagic } from "../lib/files";
 import { verifyTurnstile } from "../lib/turnstile";
 
 type AppContext = Context<{ Bindings: Env }>;
@@ -74,26 +74,16 @@ submissionsApi.post("/submissions", async (c) => {
     return c.json({ error: "at least one file is required" }, 400);
   }
 
-  const email = str(form.get("email"));
-  const db = getDb(c.env);
-
-  // Size cap first (declared size, before reading into memory), then magic
-  // bytes decide the real type. All validation finishes before any DB write.
-  const id = crypto.randomUUID();
-  const blobs: Uint8Array<ArrayBuffer>[] = [];
-  const types: SniffedFileType[] = [];
+  // Declared-size cap up front (no reads yet) so oversized uploads are
+  // rejected before a submitter row or R2 object can be created.
   for (const f of files) {
     if (f.size > MAX_FILE_BYTES) {
       return c.json({ error: `file too large (max ${MAX_FILE_BYTES} bytes)` }, 400);
     }
-    const bytes = new Uint8Array(await f.arrayBuffer());
-    const type = sniffMagic(bytes);
-    if (!type) {
-      return c.json({ error: "unsupported file type (jpeg/png/webp/pdf only)" }, 400);
-    }
-    blobs.push(bytes);
-    types.push(type);
   }
+
+  const email = str(form.get("email"));
+  const db = getDb(c.env);
 
   // Anonymous by default; `email` ties the submission to a submitter record
   // (created on first use) so reputation + blocking work for anonymous users.
@@ -104,27 +94,37 @@ submissionsApi.post("/submissions", async (c) => {
     if (submitter?.blocked) return c.json({ error: "submitter is blocked" }, 403);
   }
 
-  // Exact-byte dedup across the whole submission payload: a second identical
-  // submission is flagged dup_sha256 (sorted last in review), not merged.
-  const autoFlags: string[] = [];
-  let sha256: string | null = null;
-  if (blobs.length > 0) {
-    const all = new Uint8Array(blobs.reduce((n, b) => n + b.length, 0));
-    let offset = 0;
-    for (const b of blobs) {
-      all.set(b, offset);
-      offset += b.length;
+  // Process each file exactly once — read → magic-byte sniff → R2 → per-file
+  // sha256 — then drop the reference. A legal 10×8MB request never holds more
+  // than ~8MB of our copies at a time (formData() itself buffers the request
+  // body, which is unavoidable at this layer). Note: a mid-list magic-byte
+  // failure can leave earlier files in R2 without a DB row — harmless orphans,
+  // same trade-off as any streamed upload.
+  const id = crypto.randomUUID();
+  const imageKeys: string[] = [];
+  const fileDigests = new Uint8Array(files.length * 32);
+  for (let i = 0; i < files.length; i++) {
+    const bytes = new Uint8Array(await files[i]!.arrayBuffer());
+    const type = sniffMagic(bytes);
+    if (!type) {
+      return c.json({ error: "unsupported file type (jpeg/png/webp/pdf only)" }, 400);
     }
-    sha256 = await sha256Hex(all);
-    const [dup] = await db.select({ id: submissions.id }).from(submissions).where(eq(submissions.sha256, sha256)).limit(1);
-    if (dup) autoFlags.push("dup_sha256");
+    const key = `submissions/${id}/${i}`;
+    await c.env.SUBMISSIONS.put(key, bytes, { httpMetadata: { contentType: SNIFFED_MIME[type] } });
+    imageKeys.push(key);
+    fileDigests.set(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), i * 32);
   }
 
-  const imageKeys: string[] = [];
-  for (let i = 0; i < blobs.length; i++) {
-    const key = `submissions/${id}/${i}`;
-    await c.env.SUBMISSIONS.put(key, blobs[i]!, { httpMetadata: { contentType: SNIFFED_MIME[types[i]!] } });
-    imageKeys.push(key);
+  // Exact-byte dedup: sha256 of the concatenated per-file digests — identical
+  // "same bytes twice" semantics as hashing the payload, using ~320 bytes
+  // instead of a second ~80MB concatenation. A second identical submission is
+  // flagged dup_sha256 (sorted last in review), not merged.
+  const autoFlags: string[] = [];
+  let sha256: string | null = null;
+  if (files.length > 0) {
+    sha256 = await sha256Hex(fileDigests);
+    const [dup] = await db.select({ id: submissions.id }).from(submissions).where(eq(submissions.sha256, sha256)).limit(1);
+    if (dup) autoFlags.push("dup_sha256");
   }
 
   await db.insert(submissions).values({
