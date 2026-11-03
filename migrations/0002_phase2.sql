@@ -70,4 +70,17 @@ CREATE TABLE `check_ins` (
 );--> statement-breakpoint
 CREATE INDEX `check_ins_venue_idx` ON `check_ins` (`venue_id`);--> statement-breakpoint
 CREATE INDEX `check_ins_user_idx` ON `check_ins` (`user_id`);--> statement-breakpoint
-CREATE UNIQUE INDEX `check_ins_daily_idx` ON `check_ins` (`venue_id`, `user_id`, date(`created_at` / 1000, 'unixepoch'));
+CREATE UNIQUE INDEX `check_ins_daily_idx` ON `check_ins` (`venue_id`, `user_id`, date(`created_at` / 1000, 'unixepoch'));--> statement-breakpoint
+
+-- Task 5 (leaderboards): the opt-in display fields live on better-auth's
+-- `user` table — added here by hand since the auth tables stay outside
+-- drizzle's tracked schema (same convention as the hand-folded FKs and
+-- expression indexes above; they are absent from meta/0002_snapshot.json on
+-- purpose). `display_name` is what leaderboard rows render;
+-- `show_on_leaderboard` is the opt-in (default false → rows render
+-- "Anonymous"); `show_credit` opts into "contributed by" attribution on
+-- venue/item responses (Task 7's rewards surface). `user` has no updated_at
+-- trigger — PATCH /api/me bumps "updatedAt" itself.
+ALTER TABLE "user" ADD `display_name` text;--> statement-breakpoint
+ALTER TABLE "user" ADD `show_on_leaderboard` integer DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "user" ADD `show_credit` integer DEFAULT false NOT NULL;

@@ -6,6 +6,7 @@ import { handleQueueBatch, type SubmissionMessage } from "./queue";
 import adminApi from "./routes/admin";
 import checkinsApi from "./routes/checkins";
 import flagsApi from "./routes/flags";
+import leaderboardsApi from "./routes/leaderboards";
 import publicApi from "./routes/public";
 import submissionsApi from "./routes/submissions";
 import verifyApi from "./routes/verify";
@@ -21,6 +22,7 @@ app.route("/api", submissionsApi);
 app.route("/api", flagsApi);
 app.route("/api", verifyApi);
 app.route("/api", checkinsApi);
+app.route("/api", leaderboardsApi);
 app.route("/api/admin", adminApi);
 
 export default {

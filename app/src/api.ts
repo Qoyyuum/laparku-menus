@@ -149,6 +149,29 @@ export interface ItemFlag {
   venue_name: string;
 }
 
+// --- Types mirroring the leaderboard surface (src/routes/leaderboards.ts) --
+
+export const LEADERBOARD_KINDS = ["checkins", "contributions", "verifications"] as const;
+export type LeaderboardKind = (typeof LEADERBOARD_KINDS)[number];
+export const LEADERBOARD_PERIODS = ["week", "month", "all"] as const;
+export type LeaderboardPeriod = (typeof LEADERBOARD_PERIODS)[number];
+
+export interface LeaderboardRow {
+  rank: number;
+  // `display_name` for opted-in users, "Anonymous" otherwise.
+  name: string;
+  count: number;
+}
+
+export interface LeaderboardResponse {
+  board: LeaderboardRow[];
+  // The signed-in caller's own rank — null when anonymous or unranked.
+  me: { rank: number; count: number } | null;
+  // The applied area filter — set server-side to the caller's home board
+  // (most-checked-in area) when the request omitted `area`.
+  area: (typeof AREAS)[number] | null;
+}
+
 export function formatBnd(price: number | null): string {
   return price == null ? "—" : `B$${price.toFixed(2)}`;
 }
