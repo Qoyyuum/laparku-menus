@@ -131,6 +131,20 @@ export interface QueueSubmission {
   submitter_trust_tier: "anonymous" | "new" | "trusted" | null;
 }
 
+// Post-publish item report (mirrors GET /api/admin/flags — the flag row
+// joined with its item + venue names).
+export interface ItemFlag {
+  id: string;
+  item_id: string;
+  reason: string;
+  reporter_contact: string | null;
+  status: "open" | "resolved";
+  created_at: number;
+  item_name: string;
+  venue_id: string;
+  venue_name: string;
+}
+
 export function formatBnd(price: number | null): string {
   return price == null ? "—" : `B$${price.toFixed(2)}`;
 }

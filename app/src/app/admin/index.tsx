@@ -1,7 +1,7 @@
 import { Link, useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, Text, View } from "react-native";
-import { type QueueSubmission } from "../../api";
+import { type ItemFlag, type QueueSubmission } from "../../api";
 import { AdminApiError, adminFetch } from "../../auth";
 import { SignInGate } from "../../components/SignInGate";
 
@@ -56,17 +56,55 @@ function QueueRow({ sub }: { sub: QueueSubmission }) {
   );
 }
 
+function FlagRow({ flag, onResolve }: { flag: ItemFlag; onResolve: (id: string) => void }) {
+  const [resolving, setResolving] = useState(false);
+  return (
+    <View className="gap-1.5 rounded-xl border border-red-200 bg-red-50 p-3">
+      <View className="flex-row items-center justify-between gap-2">
+        <Text className="flex-1 text-base font-semibold text-neutral-900" numberOfLines={1}>
+          {flag.item_name}
+        </Text>
+        <Pressable
+          disabled={resolving}
+          onPress={async () => {
+            setResolving(true);
+            try {
+              await adminFetch(`/admin/flags/${flag.id}/resolve`, { method: "POST" });
+              onResolve(flag.id);
+            } finally {
+              setResolving(false);
+            }
+          }}
+          className="rounded-full bg-emerald-700 px-3 py-1 active:bg-emerald-800"
+        >
+          <Text className="text-xs font-semibold text-white">
+            {resolving ? "Resolving…" : "Resolve"}
+          </Text>
+        </Pressable>
+      </View>
+      <Text className="text-xs text-neutral-600">{flag.venue_name}</Text>
+      <Text className="text-sm text-neutral-800">{flag.reason}</Text>
+      {flag.reporter_contact ? (
+        <Text className="text-xs text-neutral-500">reporter: {flag.reporter_contact}</Text>
+      ) : null}
+    </View>
+  );
+}
+
 function Queue() {
   const [subs, setSubs] = useState<QueueSubmission[] | null>(null);
+  const [flags, setFlags] = useState<ItemFlag[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const res = await adminFetch<{ submissions: QueueSubmission[] }>(
-        "/admin/submissions?status=pending_review",
-      );
-      setSubs(res.submissions);
+      const [subsRes, flagsRes] = await Promise.all([
+        adminFetch<{ submissions: QueueSubmission[] }>("/admin/submissions?status=pending_review"),
+        adminFetch<{ flags: ItemFlag[] }>("/admin/flags?status=open"),
+      ]);
+      setSubs(subsRes.submissions);
+      setFlags(flagsRes.flags);
       setError(null);
     } catch (e) {
       setError(
@@ -104,7 +142,23 @@ function Queue() {
         />
       }
       ListHeaderComponent={
-        <Text className="text-xl font-bold text-neutral-900">Review queue</Text>
+        <View className="gap-2">
+          {flags && flags.length > 0 ? (
+            <View className="gap-2">
+              <Text className="text-xl font-bold text-neutral-900">
+                Flagged items ({flags.length})
+              </Text>
+              {flags.map((flag) => (
+                <FlagRow
+                  key={flag.id}
+                  flag={flag}
+                  onResolve={(id) => setFlags((cur) => cur?.filter((f) => f.id !== id) ?? cur)}
+                />
+              ))}
+            </View>
+          ) : null}
+          <Text className="text-xl font-bold text-neutral-900">Review queue</Text>
+        </View>
       }
       ListEmptyComponent={
         <View className="items-center gap-2 py-10">

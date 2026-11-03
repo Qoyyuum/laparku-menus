@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { getDb } from "../db/client";
-import { SUBMISSION_STATUSES, submissions, submitters } from "../db/schema";
+import { food_items, item_flags, SUBMISSION_STATUSES, submissions, submitters, venues } from "../db/schema";
 import type { Env } from "../env";
 import { PublishError, publishSubmission, rejectSubmission, type PublishEdits } from "../lib/publish";
 import { requireAuth, type AuthVariables } from "../middleware/auth";
@@ -9,6 +9,7 @@ import { requireAuth, type AuthVariables } from "../middleware/auth";
 const REVIEW_ROLES = ["reviewer", "admin"];
 // Review queue page size — reviewers work small batches.
 const LIMIT = 100;
+const FLAG_STATUSES = ["open", "resolved"] as const;
 
 const adminApi = new Hono<{ Bindings: Env; Variables: AuthVariables }>();
 
@@ -52,6 +53,60 @@ adminApi.get("/submissions/:id", async (c) => {
     .limit(1);
   if (!row) return c.json({ error: "submission not found" }, 404);
   return c.json({ submission: { ...row.submission, submitter_trust_tier: row.submitter_trust_tier } });
+});
+
+// GET /api/admin/flags?status=open — post-publish item reports. Joined with
+// the item + venue so reviewers see what was flagged without a second hop.
+// Oldest first, same FIFO discipline as the review queue.
+adminApi.get("/flags", async (c) => {
+  const status = c.req.query("status") ?? "open";
+  if (!(FLAG_STATUSES as readonly string[]).includes(status)) {
+    return c.json({ error: "invalid status", allowed: FLAG_STATUSES }, 400);
+  }
+  const rows = await getDb(c.env)
+    .select({
+      flag: item_flags,
+      item_name: food_items.name,
+      venue_id: food_items.venue_id,
+      venue_name: venues.name,
+    })
+    .from(item_flags)
+    .innerJoin(food_items, eq(item_flags.item_id, food_items.id))
+    .innerJoin(venues, eq(food_items.venue_id, venues.id))
+    .where(eq(item_flags.status, status as (typeof FLAG_STATUSES)[number]))
+    .orderBy(asc(item_flags.created_at))
+    .limit(LIMIT);
+  return c.json({
+    flags: rows.map((r) => ({
+      ...r.flag,
+      item_name: r.item_name,
+      venue_id: r.venue_id,
+      venue_name: r.venue_name,
+    })),
+  });
+});
+
+// POST /api/admin/flags/:id/resolve — mark an open flag resolved. The
+// conditional update claims the flag (like the submission decisions) so a
+// double-resolve is a 409, not a silent no-op.
+adminApi.post("/flags/:id/resolve", async (c) => {
+  const db = getDb(c.env);
+  const id = c.req.param("id");
+  const claimed = await db
+    .update(item_flags)
+    .set({ status: "resolved" })
+    .where(and(eq(item_flags.id, id), eq(item_flags.status, "open")))
+    .returning({ id: item_flags.id });
+  if (claimed.length === 0) {
+    const [flag] = await db
+      .select({ status: item_flags.status })
+      .from(item_flags)
+      .where(eq(item_flags.id, id))
+      .limit(1);
+    if (!flag) return c.json({ error: "flag not found" }, 404);
+    return c.json({ error: `flag is already ${flag.status}` }, 409);
+  }
+  return c.json({ ok: true });
 });
 
 // GET /api/admin/images/* — the ONLY way source images leave R2 (they are

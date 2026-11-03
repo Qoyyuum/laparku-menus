@@ -3,6 +3,7 @@ import { createAuth } from "./auth";
 import type { Env } from "./env";
 import { handleQueueBatch, type SubmissionMessage } from "./queue";
 import adminApi from "./routes/admin";
+import flagsApi from "./routes/flags";
 import publicApi from "./routes/public";
 import submissionsApi from "./routes/submissions";
 
@@ -14,6 +15,7 @@ app.get("/api/health", (c) => c.json({ status: "ok" }));
 app.on(["GET", "POST"], "/api/auth/*", (c) => createAuth(c.env).handler(c.req.raw));
 app.route("/api", publicApi);
 app.route("/api", submissionsApi);
+app.route("/api", flagsApi);
 app.route("/api/admin", adminApi);
 
 export default {
