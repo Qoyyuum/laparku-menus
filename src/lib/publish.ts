@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
 import {
   AREAS,
@@ -8,6 +8,7 @@ import {
   REVISION_MODES,
   submissions,
   submitters,
+  venue_requests,
   venues,
   VENUE_TYPES,
   type NewFoodItem,
@@ -251,24 +252,68 @@ export async function publishSubmission(
 
   let venue: { id: string; created: boolean } | undefined;
   let prevVerifiedAt: Date | null | undefined;
+  let prevStub: boolean | undefined;
+  // Open venue_requests this call fulfilled — re-opened by the rollback.
+  const fulfilledIds: string[] = [];
   try {
     venue = await resolveVenue(db, edits);
     // Approving a menu is itself a verification event — the reviewer just
     // confirmed the items are current — so publish bumps
     // venues.last_verified_at (same signal as a positive verify vote).
-    // The prior value is kept for the rollback below.
+    // The prior values are kept for the rollback below.
     const [prior] = await db
-      .select({ at: venues.last_verified_at })
+      .select({ at: venues.last_verified_at, stub: venues.is_stub, name: venues.name, area: venues.area })
       .from(venues)
       .where(eq(venues.id, venue.id))
       .limit(1);
     prevVerifiedAt = prior?.at ?? null;
-    await db.update(venues).set({ last_verified_at: new Date() }).where(eq(venues.id, venue.id));
+    prevStub = prior?.stub;
+    // Task 6 (coverage): the same write also clears is_stub — approving a
+    // menu onto a stub venue graduates it from "menu needed" placeholder to
+    // a real venue.
+    await db
+      .update(venues)
+      .set({ last_verified_at: new Date(), is_stub: false })
+      .where(eq(venues.id, venue.id));
 
-    // TODO(p2-task-6): stub + venue_request linkage — once those tables
-    // land, approving onto a stub venue must clear venues.is_stub and mark
-    // the matching open venue_request fulfilled. venue.id + submissionId
-    // here are the hook point.
+    // ...and fulfills every matching open venue_request: ones attached to
+    // this venue (venue_id) plus free-text missions whose trimmed,
+    // case-folded name matches the venue's name in the same area. The
+    // update is conditional on status="open" so two concurrent publishes
+    // can't double-fulfill the same mission.
+    const matched = await db
+      .select({ id: venue_requests.id })
+      .from(venue_requests)
+      .where(
+        and(
+          eq(venue_requests.status, "open"),
+          or(
+            eq(venue_requests.venue_id, venue.id),
+            and(
+              isNull(venue_requests.venue_id),
+              sql`${venue_requests.area} = ${prior?.area ?? ""}`,
+              sql`lower(trim(${venue_requests.free_text_name})) = lower(trim(${prior?.name ?? ""}))`,
+            ),
+          ),
+        ),
+      );
+    const REQUEST_CHUNK = 90; // + status param stays under D1's 100-param cap
+    for (let off = 0; off < matched.length; off += REQUEST_CHUNK) {
+      const done = await db
+        .update(venue_requests)
+        .set({ status: "fulfilled", fulfilled_submission_id: submissionId })
+        .where(
+          and(
+            eq(venue_requests.status, "open"),
+            inArray(
+              venue_requests.id,
+              matched.slice(off, off + REQUEST_CHUNK).map((r) => r.id),
+            ),
+          ),
+        )
+        .returning({ id: venue_requests.id });
+      fulfilledIds.push(...done.map((r) => r.id));
+    }
 
     // Load the venue's current menu once: the {source:"existing"} selection
     // must name only items in this set (no keeping another venue's item, no
@@ -371,15 +416,25 @@ export async function publishSubmission(
       .set({ superseded_by: null, status: "published", is_current: true })
       .where(eq(food_items.superseded_by, submissionId));
     await clearRevisionsForSubmission(db, submissionId);
+    // Re-open the missions this call fulfilled — the menu never landed, so
+    // the venue still needs one.
+    for (let off = 0; off < fulfilledIds.length; off += 90) {
+      await db
+        .update(venue_requests)
+        .set({ status: "open", fulfilled_submission_id: null })
+        .where(inArray(venue_requests.id, fulfilledIds.slice(off, off + 90)));
+    }
     if (venue?.created) {
       await db.delete(venues).where(eq(venues.id, venue.id));
     } else if (venue && prevVerifiedAt !== undefined) {
-      // Undo the verification bump — a failed publish vouches for nothing.
-      // prevVerifiedAt stays undefined if the bump never ran (the select
-      // above threw), in which case the stored value is already correct.
+      // Undo the verification bump and the stub graduation — a failed
+      // publish vouches for nothing. prevVerifiedAt stays undefined if the
+      // select above threw, in which case the stored values are already
+      // correct (prevStub is read in the same select, so it's defined
+      // exactly when this branch needs it).
       await db
         .update(venues)
-        .set({ last_verified_at: prevVerifiedAt })
+        .set({ last_verified_at: prevVerifiedAt, is_stub: prevStub ?? false })
         .where(eq(venues.id, venue.id));
     }
     await db

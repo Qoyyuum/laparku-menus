@@ -59,6 +59,9 @@ export interface Venue {
   website: string | null;
   halal_status: (typeof HALAL_STATUSES)[number];
   verification: "unverified" | "verified" | "claimed-by-owner";
+  // Coverage stub: a name+area-only placeholder flagged "menu needed" —
+  // cleared server-side once a submission is approved onto the venue.
+  is_stub?: boolean;
   // Derived on the worker from last_verified_at vs STALE_MONTHS
   // (src/lib/freshness.ts): <3mo fresh, <6mo aging, otherwise stale.
   freshness?: "fresh" | "aging" | "stale";
@@ -170,6 +173,30 @@ export interface LeaderboardResponse {
   // The applied area filter — set server-side to the caller's home board
   // (most-checked-in area) when the request omitted `area`.
   area: (typeof AREAS)[number] | null;
+}
+
+// --- Types mirroring the coverage surface (src/routes/coverage.ts) --------
+
+// A "we need a menu here" mission (GET /api/requests row — requester_id is
+// deliberately not exposed).
+export interface VenueRequest {
+  id: string;
+  venue_id: string | null;
+  venue_name: string | null;
+  free_text_name: string | null;
+  area: (typeof AREAS)[number];
+  note: string | null;
+  status: "open" | "fulfilled";
+  fulfilled_submission_id: string | null;
+  created_at: number;
+}
+
+export interface CoverageArea {
+  area: (typeof AREAS)[number];
+  venues: number;
+  stubs: number;
+  open_requests: number;
+  items: number;
 }
 
 export function formatBnd(price: number | null): string {

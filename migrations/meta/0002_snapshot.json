@@ -662,6 +662,129 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "venue_requests": {
+      "name": "venue_requests",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "requester_id": {
+          "name": "requester_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "venue_id": {
+          "name": "venue_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "free_text_name": {
+          "name": "free_text_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "area": {
+          "name": "area",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'open'"
+        },
+        "fulfilled_submission_id": {
+          "name": "fulfilled_submission_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "venue_requests_venue_idx": {
+          "name": "venue_requests_venue_idx",
+          "columns": [
+            "venue_id"
+          ],
+          "isUnique": false
+        },
+        "venue_requests_status_idx": {
+          "name": "venue_requests_status_idx",
+          "columns": [
+            "status"
+          ],
+          "isUnique": false
+        },
+        "venue_requests_requester_idx": {
+          "name": "venue_requests_requester_idx",
+          "columns": [
+            "requester_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "venue_requests_venue_id_venues_id_fk": {
+          "name": "venue_requests_venue_id_venues_id_fk",
+          "tableFrom": "venue_requests",
+          "tableTo": "venues",
+          "columnsFrom": [
+            "venue_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "venue_requests_fulfilled_submission_id_submissions_id_fk": {
+          "name": "venue_requests_fulfilled_submission_id_submissions_id_fk",
+          "tableFrom": "venue_requests",
+          "tableTo": "submissions",
+          "columnsFrom": [
+            "fulfilled_submission_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "venue_revisions": {
       "name": "venue_revisions",
       "columns": {
@@ -859,6 +982,14 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "is_stub": {
+          "name": "is_stub",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
         },
         "created_at": {
           "name": "created_at",

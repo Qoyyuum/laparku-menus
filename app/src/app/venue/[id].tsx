@@ -179,6 +179,7 @@ export default function VenueScreen() {
     halal_status?: string;
     verification?: string;
     freshness?: string;
+    is_stub?: string;
   }>();
   const [items, setItems] = useState<FoodItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -213,6 +214,11 @@ export default function VenueScreen() {
           <Text className="text-xs font-medium text-sky-700">✓ {params.verification}</Text>
         ) : null}
         {freshness ? <Text className={`text-xs font-medium ${freshness.className}`}>{freshness.text}</Text> : null}
+        {params.is_stub === "true" ? (
+          <Text className="text-xs font-semibold text-amber-700">
+            ⚑ Menu needed — this is a stub. Be the first to send its menu in.
+          </Text>
+        ) : null}
       </View>
 
       {params.id ? <CheckInWidget venueId={params.id} /> : null}

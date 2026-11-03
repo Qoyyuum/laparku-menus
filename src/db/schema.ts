@@ -30,6 +30,7 @@ export const ITEM_TYPES = ["dish", "product"] as const;
 export const SOURCE_TYPES = ["menu_pdf", "menu_photo", "product_photo", "barcode", "url", "manual_entry"] as const;
 export const SUBMISSION_STATUSES = ["pending", "pending_review", "auto_rejected", "rejected", "approved"] as const;
 export const REVISION_MODES = ["replace", "merge"] as const;
+export const VENUE_REQUEST_STATUSES = ["open", "fulfilled"] as const;
 
 const id = () =>
   text("id")
@@ -68,6 +69,11 @@ export const venues = sqliteTable("venues", {
   // into — read as "possibly closed" on the admin staleness list (a hint
   // for reviewers, never an automatic status change).
   last_checkin_at: integer("last_checkin_at", { mode: "timestamp_ms" }),
+  // Coverage stub: a placeholder venue (name + area only) seeded manually
+  // or by reviewers to mark "menu needed here". Stubs appear in the public
+  // venue lists/search with `is_stub` on the payload; approving a
+  // submission onto a stub clears the flag (see src/lib/publish.ts).
+  is_stub: integer("is_stub", { mode: "boolean" }).notNull().default(false),
   created_at: createdAt(),
   updated_at: updatedAt(),
 });
@@ -256,6 +262,34 @@ export const check_ins = sqliteTable(
   (t) => [index("check_ins_venue_idx").on(t.venue_id), index("check_ins_user_idx").on(t.user_id)],
 );
 
+// A "we need a menu here" mission. Two shapes: attached to a stub venue
+// (venue_id set — approving a submission onto that venue fulfills it) or a
+// free-text name + area for a venue not in the dataset yet (a publish whose
+// venue name+area matches fulfills it — see src/lib/publish.ts). `area` is
+// stored on every row — copied from the venue for venue-linked requests —
+// so the area filter and the coverage rollup don't need the join.
+// requester_id follows the auth convention: plain-text better-auth user id,
+// no drizzle-level FK into the untracked "user" table.
+export const venue_requests = sqliteTable(
+  "venue_requests",
+  {
+    id: id(),
+    requester_id: text("requester_id").notNull(),
+    venue_id: text("venue_id").references(() => venues.id),
+    free_text_name: text("free_text_name"),
+    area: text("area", { enum: AREAS }).notNull(),
+    note: text("note"),
+    status: text("status", { enum: VENUE_REQUEST_STATUSES }).notNull().default("open"),
+    fulfilled_submission_id: text("fulfilled_submission_id").references(() => submissions.id),
+    created_at: createdAt(),
+  },
+  (t) => [
+    index("venue_requests_venue_idx").on(t.venue_id),
+    index("venue_requests_status_idx").on(t.status),
+    index("venue_requests_requester_idx").on(t.requester_id),
+  ],
+);
+
 export const item_flags = sqliteTable(
   "item_flags",
   {
@@ -288,4 +322,6 @@ export type Verification = typeof verifications.$inferSelect;
 export type NewVerification = typeof verifications.$inferInsert;
 export type CheckIn = typeof check_ins.$inferSelect;
 export type NewCheckIn = typeof check_ins.$inferInsert;
+export type VenueRequest = typeof venue_requests.$inferSelect;
+export type NewVenueRequest = typeof venue_requests.$inferInsert;
 export type RevisionMode = (typeof REVISION_MODES)[number];

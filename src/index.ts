@@ -5,6 +5,7 @@ import { handleMcpRequest } from "./mcp";
 import { handleQueueBatch, type SubmissionMessage } from "./queue";
 import adminApi from "./routes/admin";
 import checkinsApi from "./routes/checkins";
+import coverageApi from "./routes/coverage";
 import flagsApi from "./routes/flags";
 import leaderboardsApi from "./routes/leaderboards";
 import publicApi from "./routes/public";
@@ -23,6 +24,7 @@ app.route("/api", flagsApi);
 app.route("/api", verifyApi);
 app.route("/api", checkinsApi);
 app.route("/api", leaderboardsApi);
+app.route("/api", coverageApi);
 app.route("/api/admin", adminApi);
 
 export default {

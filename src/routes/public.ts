@@ -55,10 +55,15 @@ function venueConds(f: VenueFilters): SQL[] {
 
 export interface PublicVenueFilters extends VenueFilters {
   q?: string;
+  // `stub` narrows to "menu needed" placeholders (true) or venues with a
+  // real menu (false); absent returns both. Used by the coverage page's
+  // stub list via `GET /api/venues?stub=true`.
+  stub?: boolean;
 }
 
 export async function listPublishedVenues(env: Env, f: PublicVenueFilters) {
   const conds = venueConds(f);
+  if (f.stub !== undefined) conds.push(eq(venues.is_stub, f.stub));
   if (f.q) conds.push(venueNameMatch(f.q));
   const rows = await getDb(env)
     .select()
@@ -150,7 +155,17 @@ publicApi.get("/venues", async (c) => {
   const halal = oneOf(c.req.query("halal"), HALAL_STATUSES);
   if (halal === null) return c.json({ error: "invalid halal", allowed: HALAL_STATUSES }, 400);
 
-  const rows = await listPublishedVenues(c.env, { type, area, halal, q: c.req.query("q") });
+  // `stub` is the only non-enum filter — a strict boolean string.
+  const stubRaw = c.req.query("stub");
+  let stub: boolean | undefined;
+  if (stubRaw !== undefined && stubRaw !== "") {
+    if (stubRaw !== "true" && stubRaw !== "false") {
+      return c.json({ error: "invalid stub", allowed: ["true", "false"] }, 400);
+    }
+    stub = stubRaw === "true";
+  }
+
+  const rows = await listPublishedVenues(c.env, { type, area, halal, stub, q: c.req.query("q") });
   return c.json({ venues: rows });
 });
 

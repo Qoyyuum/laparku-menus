@@ -19,6 +19,7 @@ export function VenueCard({ venue }: { venue: Venue }) {
           halal_status: venue.halal_status,
           verification: venue.verification,
           freshness: venue.freshness,
+          is_stub: venue.is_stub ? "true" : undefined,
         },
       }}
       asChild
@@ -31,6 +32,7 @@ export function VenueCard({ venue }: { venue: Venue }) {
         <Text className="text-sm text-neutral-600">
           {venue.type} · {venue.area}
         </Text>
+        {venue.is_stub ? <Text className="text-xs font-semibold text-amber-700">⚑ Menu needed</Text> : null}
         {venue.verification !== "unverified" ? (
           <Text className="text-xs font-medium text-sky-700">✓ {venue.verification}</Text>
         ) : null}

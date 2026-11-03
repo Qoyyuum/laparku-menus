@@ -83,4 +83,33 @@ CREATE UNIQUE INDEX `check_ins_daily_idx` ON `check_ins` (`venue_id`, `user_id`,
 -- trigger — PATCH /api/me bumps "updatedAt" itself.
 ALTER TABLE "user" ADD `display_name` text;--> statement-breakpoint
 ALTER TABLE "user" ADD `show_on_leaderboard` integer DEFAULT false NOT NULL;--> statement-breakpoint
-ALTER TABLE "user" ADD `show_credit` integer DEFAULT false NOT NULL;
+ALTER TABLE "user" ADD `show_credit` integer DEFAULT false NOT NULL;--> statement-breakpoint
+
+-- Task 6 (coverage): `venues.is_stub` marks placeholder venues (name +
+-- area only, seeded manually or by reviewers) that need a menu — they ride
+-- the public venue payloads with a "menu needed" badge, and approving a
+-- submission onto a stub clears the flag. `venue_requests` records "we
+-- need a menu here" missions: attached to a stub via venue_id, or a
+-- free-text name + area for venues not in the dataset yet. `area` is
+-- stored on every row (copied from the venue for venue-linked requests) so
+-- filtering and the /api/coverage rollup don't need the join. Publish
+-- fulfills matching open rows — venue_id hit, or free-text name + area
+-- match — via fulfilled_submission_id. requester_id follows the auth
+-- convention: plain-text better-auth user id, no FK into "user".
+ALTER TABLE `venues` ADD `is_stub` integer DEFAULT false NOT NULL;--> statement-breakpoint
+CREATE TABLE `venue_requests` (
+	`id` text PRIMARY KEY NOT NULL,
+	`requester_id` text NOT NULL,
+	`venue_id` text,
+	`free_text_name` text,
+	`area` text NOT NULL,
+	`note` text,
+	`status` text DEFAULT 'open' NOT NULL,
+	`fulfilled_submission_id` text,
+	`created_at` integer NOT NULL,
+	FOREIGN KEY (`venue_id`) REFERENCES `venues`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`fulfilled_submission_id`) REFERENCES `submissions`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE INDEX `venue_requests_venue_idx` ON `venue_requests` (`venue_id`);--> statement-breakpoint
+CREATE INDEX `venue_requests_status_idx` ON `venue_requests` (`status`);--> statement-breakpoint
+CREATE INDEX `venue_requests_requester_idx` ON `venue_requests` (`requester_id`);

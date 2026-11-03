@@ -12,6 +12,9 @@ export default function TabsLayout() {
         tabBarActiveTintColor: "#047857",
         headerRight: () => (
           <View className="flex-row">
+            <Link href="/coverage">
+              <Text className="px-4 text-base font-medium text-white">Coverage</Text>
+            </Link>
             <Link href="/leaderboard">
               <Text className="px-4 text-base font-medium text-white">Boards</Text>
             </Link>
