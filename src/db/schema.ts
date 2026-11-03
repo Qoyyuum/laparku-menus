@@ -1,4 +1,4 @@
-import { index, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 // Machine estimate vs reviewer-verified nutrition (spec: `nutrition_estimate`).
 export interface NutritionEstimate {
@@ -290,6 +290,26 @@ export const venue_requests = sqliteTable(
   ],
 );
 
+// Manual/honorary badge awards ONLY (e.g. community_star) — computed
+// badges are evaluated at read time by src/lib/badges.ts and never write
+// rows. One award per (user, badge) via the unique index. user_id and
+// awarded_by follow the auth convention — plain-text better-auth user
+// ids, no drizzle-level FK into the untracked "user" table.
+export const user_badges = sqliteTable(
+  "user_badges",
+  {
+    id: id(),
+    user_id: text("user_id").notNull(),
+    badge_key: text("badge_key").notNull(),
+    awarded_by: text("awarded_by").notNull(),
+    created_at: createdAt(),
+  },
+  (t) => [
+    index("user_badges_user_idx").on(t.user_id),
+    uniqueIndex("user_badges_user_key_idx").on(t.user_id, t.badge_key),
+  ],
+);
+
 export const item_flags = sqliteTable(
   "item_flags",
   {
@@ -324,4 +344,6 @@ export type CheckIn = typeof check_ins.$inferSelect;
 export type NewCheckIn = typeof check_ins.$inferInsert;
 export type VenueRequest = typeof venue_requests.$inferSelect;
 export type NewVenueRequest = typeof venue_requests.$inferInsert;
+export type UserBadge = typeof user_badges.$inferSelect;
+export type NewUserBadge = typeof user_badges.$inferInsert;
 export type RevisionMode = (typeof REVISION_MODES)[number];

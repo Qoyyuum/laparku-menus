@@ -4,6 +4,7 @@ import { createAuth } from "../auth";
 import { getDb } from "../db/client";
 import { AREAS, VENUE_TYPES } from "../db/schema";
 import type { Env } from "../env";
+import { getTopBadges } from "../lib/badges";
 import { requireAuth, type AuthVariables } from "../middleware/auth";
 
 // Leaderboard knobs are constants in code, per the phase-2 plan.
@@ -120,9 +121,10 @@ leaderboardsApi.get("/leaderboards", async (c) => {
   const where = and(...conds)!; // conds always carries the kind predicate
 
   const rows = (await db.all(sql`
-    SELECT t.n AS n,
+    SELECT t.user_id AS user_id, t.n AS n,
       CASE WHEN u.show_on_leaderboard = 1 AND u.display_name IS NOT NULL AND u.display_name <> ''
-        THEN u.display_name ELSE 'Anonymous' END AS name
+        THEN u.display_name ELSE 'Anonymous' END AS name,
+      u.show_on_leaderboard AS show_on_leaderboard
     FROM (
       SELECT c.user_id AS user_id, count(DISTINCT c.id) AS n
       ${from} WHERE ${where} GROUP BY c.user_id
@@ -130,14 +132,26 @@ leaderboardsApi.get("/leaderboards", async (c) => {
     LEFT JOIN "user" AS u ON u.id = t.user_id
     ORDER BY t.n DESC, t.user_id ASC
     LIMIT ${BOARD_SIZE}
-  `)) as { n: number; name: string }[];
+  `)) as { user_id: string; n: number; name: string; show_on_leaderboard: number | null }[];
+
+  // Badge flair (Task 8): each OPTED-IN row carries its user's
+  // highest-tier badge key — badges leak activity patterns, so opted-out
+  // rows always read null, same privacy gate as /api/users/:id/badges.
+  // One batched pass for the whole board, not a lookup per row.
+  const optedIn = rows.filter((r) => Number(r.show_on_leaderboard) === 1).map((r) => r.user_id);
+  const topBadges = await getTopBadges(db, optedIn);
 
   // Competition ranking (1 + count of strictly-greater entries) so ties
   // share a rank — the same rule `me` is computed with below.
   let rank = 0;
   const board = rows.map((r, i) => {
     if (i === 0 || Number(r.n) !== Number(rows[i - 1]!.n)) rank = i + 1;
-    return { rank, name: String(r.name), count: Number(r.n) };
+    return {
+      rank,
+      name: String(r.name),
+      count: Number(r.n),
+      top_badge: Number(r.show_on_leaderboard) === 1 ? (topBadges.get(r.user_id) ?? null) : null,
+    };
   });
 
   // The caller's own rank, including beyond the top-50 cut: their count plus

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Switch, Text, TextInput, View } from "react-native";
-import type { MeProfile } from "../api";
+import type { Badge, MeProfile } from "../api";
 import { adminFetch, authClient } from "../auth";
 import { SignInGate } from "../components/SignInGate";
 
@@ -27,6 +27,7 @@ const STAT_FIELDS: { key: keyof Pick<MeProfile, "submissions" | "approved" | "ch
 function ProfileBody() {
   const { data: session } = authClient.useSession();
   const [me, setMe] = useState<MeProfile | null>(null);
+  const [badges, setBadges] = useState<Badge[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -50,6 +51,10 @@ function ProfileBody() {
       })
       .catch((e: Error) => !cancelled && setError(e.message))
       .finally(() => !cancelled && setLoading(false));
+    // Every badge with progress — powers the earned grid + progress bars.
+    adminFetch<{ badges: Badge[] }>("/me/badges")
+      .then((r) => !cancelled && setBadges(r.badges))
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -102,6 +107,8 @@ function ProfileBody() {
         </View>
       ) : null}
 
+      {badges ? <BadgeCase badges={badges} /> : null}
+
       <View className="gap-2 rounded-xl border border-neutral-200 bg-white p-4">
         <Text className="text-base font-bold text-neutral-900">Display settings</Text>
         <Text className="text-sm leading-6 text-neutral-600">
@@ -139,5 +146,54 @@ function ProfileBody() {
         <Text className="text-base font-medium text-neutral-800">Sign out</Text>
       </Pressable>
     </ScrollView>
+  );
+}
+
+// Badge case (Task 8): earned badges as a grid of chips, then the unearned
+// ones with a progress bar each ("23/50 check-ins") so there's always a
+// next goal in view. Data comes from GET /api/me/badges — computed
+// server-side, progress included.
+function BadgeCase({ badges }: { badges: Badge[] }) {
+  const earned = badges.filter((b) => b.earned);
+  const pending = badges.filter((b) => !b.earned);
+  return (
+    <View className="gap-3 rounded-xl border border-neutral-200 bg-white p-4">
+      <Text className="text-base font-bold text-neutral-900">Badges</Text>
+      {earned.length === 0 ? (
+        <Text className="text-sm text-neutral-600">No badges yet — your first submission earns one.</Text>
+      ) : (
+        <View className="flex-row flex-wrap gap-2">
+          {earned.map((b) => (
+            <View key={b.key} className="rounded-full border border-amber-500 bg-amber-50 px-3 py-1.5">
+              <Text className="text-sm font-semibold text-amber-800">{b.name}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+      {pending.length > 0 ? (
+        <View className="gap-2.5">
+          {pending.map((b) => {
+            const pct = Math.min(100, Math.round((b.progress / Math.max(b.target, 1)) * 100));
+            return (
+              <View key={b.key} className="gap-1">
+                <View className="flex-row items-baseline gap-2">
+                  <Text className="flex-1 text-sm font-medium text-neutral-800" numberOfLines={1}>
+                    {b.name}
+                  </Text>
+                  <Text className="text-xs text-neutral-500">
+                    {b.progress}/{b.target}
+                  </Text>
+                </View>
+                <View className="h-2 overflow-hidden rounded-full bg-neutral-200">
+                  {/* Percentage widths aren't expressible as static
+                      nativewind classes — the fill gets an inline style. */}
+                  <View className="h-2 rounded-full bg-emerald-600" style={{ width: `${pct}%` }} />
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      ) : null}
+    </View>
   );
 }

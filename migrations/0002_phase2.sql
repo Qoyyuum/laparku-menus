@@ -112,4 +112,22 @@ CREATE TABLE `venue_requests` (
 );--> statement-breakpoint
 CREATE INDEX `venue_requests_venue_idx` ON `venue_requests` (`venue_id`);--> statement-breakpoint
 CREATE INDEX `venue_requests_status_idx` ON `venue_requests` (`status`);--> statement-breakpoint
-CREATE INDEX `venue_requests_requester_idx` ON `venue_requests` (`requester_id`);
+CREATE INDEX `venue_requests_requester_idx` ON `venue_requests` (`requester_id`);--> statement-breakpoint
+
+-- Task 8 (badges): `user_badges` stores ONLY manual/honorary awards an
+-- admin grants (e.g. community_star). Computed badges are evaluated at
+-- read time from the activity tables by src/lib/badges.ts and never write
+-- rows — this table would be empty in a pure-computed world. The UNIQUE
+-- index makes one manual award per (user, badge); the route still
+-- pre-checks so a repeat award reads as a 409, not a constraint error.
+-- user_id and awarded_by follow the auth convention: plain-text
+-- better-auth user ids, no FK into the untracked "user" table.
+CREATE TABLE `user_badges` (
+	`id` text PRIMARY KEY NOT NULL,
+	`user_id` text NOT NULL,
+	`badge_key` text NOT NULL,
+	`awarded_by` text NOT NULL,
+	`created_at` integer NOT NULL
+);--> statement-breakpoint
+CREATE INDEX `user_badges_user_idx` ON `user_badges` (`user_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `user_badges_user_key_idx` ON `user_badges` (`user_id`, `badge_key`);

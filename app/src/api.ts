@@ -167,6 +167,8 @@ export interface LeaderboardRow {
   // `display_name` for opted-in users, "Anonymous" otherwise.
   name: string;
   count: number;
+  // Highest-tier earned badge key — opted-in rows only, null otherwise.
+  top_badge?: string | null;
 }
 
 export interface LeaderboardResponse {
@@ -200,6 +202,51 @@ export interface CoverageArea {
   stubs: number;
   open_requests: number;
   items: number;
+}
+
+// --- Types mirroring the badges surface (src/routes/badges.ts) ----------
+
+// A badge from GET /api/me/badges (every registry badge, with progress so
+// the app can draw bars) or GET /api/users/:id/badges (earned only).
+// `manual` marks honorary badges granted via user_badges rows.
+export interface Badge {
+  key: string;
+  name: string;
+  description?: string;
+  tier?: number;
+  manual?: boolean;
+  earned: boolean;
+  progress: number;
+  target: number;
+}
+
+// Display names for the badge keys leaderboard rows carry (mirrors the
+// registry in src/lib/badges.ts — the row payload is a key only).
+export const BADGE_NAMES: Record<string, string> = {
+  first_dish: "First Dish",
+  contributor_10: "Contributor",
+  contributor_50: "Trusted Contributor",
+  contributor_100: "Century Contributor",
+  pioneer_brunei_muara: "Peneroka Brunei-Muara",
+  pioneer_tutong: "Peneroka Tutong",
+  pioneer_belait: "Peneroka Belait",
+  pioneer_temburong: "Peneroka Temburong",
+  trailblazer: "Trailblazer",
+  cartographer: "Cartographer",
+  first_checkin: "First Check-in",
+  regular_10: "Regular",
+  regular_50: "Familiar Face",
+  regular_100: "Local Legend",
+  brunei_explorer: "Brunei Explorer",
+  hawker_hero: "Hawker Hero",
+  fact_checker: "Fact Checker",
+  founding: "Founding Member",
+  reviewer: "Reviewer",
+  community_star: "Community Star",
+};
+
+export function badgeName(key: string): string {
+  return BADGE_NAMES[key] ?? key.replaceAll("_", " ");
 }
 
 // --- Types mirroring the rewards surface (src/routes/me.ts, /api/stats) ---

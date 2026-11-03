@@ -4,6 +4,7 @@ import type { Env } from "./env";
 import { handleMcpRequest } from "./mcp";
 import { handleQueueBatch, type SubmissionMessage } from "./queue";
 import adminApi from "./routes/admin";
+import badgesApi from "./routes/badges";
 import checkinsApi from "./routes/checkins";
 import coverageApi from "./routes/coverage";
 import flagsApi from "./routes/flags";
@@ -26,6 +27,7 @@ app.route("/api", verifyApi);
 app.route("/api", checkinsApi);
 app.route("/api", leaderboardsApi);
 app.route("/api", meApi);
+app.route("/api", badgesApi);
 app.route("/api", coverageApi);
 app.route("/api/admin", adminApi);
 

@@ -99,8 +99,11 @@ it("kind=checkins ranks users by check-in count with ranks and opt-in names", as
 
   const { res, body } = await board("?kind=checkins&period=all", ali.cookie);
   expect(res.status).toBe(200);
-  expect(body.board[0]).toEqual({ rank: 1, name: "Ali", count: 3 });
-  expect(body.board[1]).toEqual({ rank: 2, name: "Siti", count: 1 });
+  // top_badge (Task 8): Ali's check-ins are the earliest Brunei-Muara
+  // events in this file, so they hold pioneer_brunei_muara (tier 4); Siti
+  // tops out at first_checkin (tier 2) over founding (tier 1).
+  expect(body.board[0]).toEqual({ rank: 1, name: "Ali", count: 3, top_badge: "pioneer_brunei_muara" });
+  expect(body.board[1]).toEqual({ rank: 2, name: "Siti", count: 1, top_badge: "first_checkin" });
   // The caller is inside the board — `me` still reports their rank.
   expect(body.me).toEqual({ rank: 1, count: 3 });
   // An anonymous caller gets the board but no `me`.
@@ -197,12 +200,15 @@ it("kind=contributions counts approved submissions only; area filters via the pu
   const { res, body } = await board("?kind=contributions&period=all");
   expect(res.status).toBe(200);
   expect(body.board).toHaveLength(2);
-  expect(body.board[0]).toEqual({ rank: 1, name: "Chef", count: 2 });
-  expect(body.board[1]).toEqual({ rank: 2, name: "Foodie", count: 1 });
+  // Both contributors top out at first_dish — the Belait pioneer badge
+  // belongs to (c)'s Traveller, whose earlier check-in beats Chef's
+  // submission (exactly one holder per district).
+  expect(body.board[0]).toEqual({ rank: 1, name: "Chef", count: 2, top_badge: "first_dish" });
+  expect(body.board[1]).toEqual({ rank: 2, name: "Foodie", count: 1, top_badge: "first_dish" });
 
   const belaitBoard = await board("?kind=contributions&period=all&area=Belait");
   expect(belaitBoard.body.board).toHaveLength(1);
-  expect(belaitBoard.body.board[0]).toEqual({ rank: 1, name: "Chef", count: 1 });
+  expect(belaitBoard.body.board[0]).toEqual({ rank: 1, name: "Chef", count: 1, top_badge: "first_dish" });
 });
 
 it("kind=verifications ranks votes", async () => {
@@ -219,7 +225,8 @@ it("kind=verifications ranks votes", async () => {
 
   const { res, body } = await board("?kind=verifications&period=all", u.cookie);
   expect(res.status).toBe(200);
-  expect(body.board[0]).toEqual({ rank: 1, name: "Verifier", count: 2 });
+  // 2 votes is short of fact_checker's 25 — founding (tier 1) is the top.
+  expect(body.board[0]).toEqual({ rank: 1, name: "Verifier", count: 2, top_badge: "founding" });
   expect(body.me).toEqual({ rank: 1, count: 2 });
 });
 

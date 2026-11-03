@@ -3,6 +3,7 @@ import { ActivityIndicator, Platform, Pressable, ScrollView, Switch, Text, TextI
 import {
   API_BASE,
   AREAS,
+  badgeName,
   LEADERBOARD_KINDS,
   LEADERBOARD_PERIODS,
   type LeaderboardKind,
@@ -136,6 +137,12 @@ export default function LeaderboardScreen() {
             <Text className="flex-1 text-base text-neutral-900" numberOfLines={1}>
               {r.name}
             </Text>
+            {/* Opted-in rows carry their highest-tier badge key (Task 8). */}
+            {r.top_badge ? (
+              <View className="rounded-full border border-amber-500 bg-amber-50 px-2 py-0.5">
+                <Text className="text-xs font-semibold text-amber-800">{badgeName(r.top_badge)}</Text>
+              </View>
+            ) : null}
             <Text className="text-base font-semibold text-neutral-800">{r.count}</Text>
           </View>
         ))}

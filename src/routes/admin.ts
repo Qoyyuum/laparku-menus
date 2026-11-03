@@ -1,8 +1,9 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { getDb } from "../db/client";
-import { food_items, item_flags, SUBMISSION_STATUSES, submissions, submitters, venues } from "../db/schema";
+import { food_items, item_flags, SUBMISSION_STATUSES, submissions, submitters, user_badges, venues } from "../db/schema";
 import type { Env } from "../env";
+import { BADGES } from "../lib/badges";
 import { listStaleVenues } from "../lib/freshness";
 import { PublishError, publishSubmission, rejectSubmission, type PublishEdits } from "../lib/publish";
 import { requireAuth, type AuthVariables } from "../middleware/auth";
@@ -229,6 +230,50 @@ adminApi.post("/submissions/:id/reject", async (c) => {
     if (e instanceof PublishError) return c.json({ error: e.message }, e.status as 400);
     throw e;
   }
+});
+
+// POST /api/admin/users/:id/badges — grant a manual/honorary badge. The
+// file-level guard admits reviewers too, but awards are admin-only, so the
+// handler re-checks the session roles itself. Body: { badge_key } — must
+// be a registry key (BADGES), which is what makes community_star-style
+// honorary badges awardable while computed badges could be granted too
+// (pointless but harmless). Rejects unknown keys (400), unknown users
+// (404), and badges the user already holds (409). Inserts a user_badges
+// row; computed badges still never write rows.
+adminApi.post("/users/:id/badges", async (c) => {
+  const roles = (c.get("user").role ?? "submitter").split(",");
+  if (!roles.includes("admin")) return c.json({ error: "forbidden" }, 403);
+
+  let body: { badge_key?: unknown };
+  try {
+    body = (await c.req.json()) as { badge_key?: unknown };
+  } catch {
+    return c.json({ error: "expected JSON body" }, 400);
+  }
+  if (typeof body !== "object" || body === null || typeof body.badge_key !== "string") {
+    return c.json({ error: "badge_key must be a string" }, 400);
+  }
+  if (!BADGES[body.badge_key]) {
+    return c.json({ error: "unknown badge_key", allowed: Object.keys(BADGES) }, 400);
+  }
+
+  const db = getDb(c.env);
+  const userId = c.req.param("id");
+  const [target] = (await db.all(sql`SELECT id FROM "user" WHERE id = ${userId}`)) as { id: string }[];
+  if (!target) return c.json({ error: "user not found" }, 404);
+
+  const held = await db
+    .select({ id: user_badges.id })
+    .from(user_badges)
+    .where(and(eq(user_badges.user_id, userId), eq(user_badges.badge_key, body.badge_key)))
+    .limit(1);
+  if (held.length > 0) return c.json({ error: "badge already held" }, 409);
+
+  const [row] = await db
+    .insert(user_badges)
+    .values({ user_id: userId, badge_key: body.badge_key, awarded_by: c.get("user").id })
+    .returning();
+  return c.json({ badge: row }, 201);
 });
 
 export default adminApi;
