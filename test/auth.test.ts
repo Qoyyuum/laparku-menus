@@ -3,50 +3,12 @@ import { eq } from "drizzle-orm";
 import { expect, it } from "vitest";
 import { getDb } from "../src/db/client";
 import { submissions } from "../src/db/schema";
+import { forgeSession } from "./helpers/auth";
 
-// Mirrors DEFAULT_SECRET in better-auth/dist/utils/constants.mjs — used when
-// env.BETTER_AUTH_SECRET is unset (test env). If the binding is set, the real
-// secret is used instead.
-const DEFAULT_SECRET = "better-auth-secret-12345678901234567890";
-
-// better-auth signs the session_token cookie as `<token>.<base64 hmac>`
-// (better-call signCookieValue: HMAC-SHA256 with the auth secret, standard
-// base64 with padding). We reproduce that here to forge sessions without
-// going through the magic-link email flow.
-async function signCookieValue(value: string, secret: string): Promise<string> {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value));
-  return encodeURIComponent(`${value}.${btoa(String.fromCharCode(...new Uint8Array(sig)))}`);
-}
-
-// Inserts a better-auth `user` + `session` row directly and returns a Cookie
-// header value that satisfy auth.api.getSession. The kysely adapter stores
-// dates as ISO strings and booleans as 0/1 for sqlite backends (D1 included).
-async function forgeSession(role: string, { banned = false }: { banned?: boolean } = {}): Promise<string> {
-  const now = new Date();
-  const userId = crypto.randomUUID();
-  const token = crypto.randomUUID().replaceAll("-", "");
-  await env.DB.prepare(
-    `INSERT INTO "user" ("id", "name", "email", "emailVerified", "createdAt", "updatedAt", "role", "banned")
-     VALUES (?, ?, ?, 0, ?, ?, ?, ?)`,
-  )
-    .bind(userId, "Forge", `${userId}@test.dev`, now.toISOString(), now.toISOString(), role, banned ? 1 : 0)
-    .run();
-  const expires = new Date(now.getTime() + 60 * 60 * 1000);
-  await env.DB.prepare(
-    `INSERT INTO "session" ("id", "expiresAt", "token", "createdAt", "updatedAt", "userId")
-     VALUES (?, ?, ?, ?, ?, ?)`,
-  )
-    .bind(crypto.randomUUID(), expires.toISOString(), token, now.toISOString(), now.toISOString(), userId)
-    .run();
-  const secret = env.BETTER_AUTH_SECRET || DEFAULT_SECRET;
-  return `better-auth.session_token=${await signCookieValue(token, secret)}`;
+// forgeSession lives in test/helpers/auth.ts (shared with admin.test.ts);
+// it returns { cookie, userId } — these tests only need the Cookie header.
+async function cookieFor(role: string, opts?: { banned?: boolean }): Promise<string> {
+  return (await forgeSession(role, opts)).cookie;
 }
 
 it("GET /api/admin/ping returns 401 with no session", async () => {
@@ -55,19 +17,19 @@ it("GET /api/admin/ping returns 401 with no session", async () => {
 });
 
 it("GET /api/admin/ping returns 403 for a submitter-role session", async () => {
-  const cookie = await forgeSession("submitter");
+  const cookie = await cookieFor("submitter");
   const res = await SELF.fetch("https://x/api/admin/ping", { headers: { cookie } });
   expect(res.status).toBe(403);
 });
 
 it("GET /api/admin/ping returns 200 for a reviewer session", async () => {
-  const cookie = await forgeSession("reviewer");
+  const cookie = await cookieFor("reviewer");
   const res = await SELF.fetch("https://x/api/admin/ping", { headers: { cookie } });
   expect(res.status).toBe(200);
 });
 
 it("GET /api/admin/ping returns 200 for an admin session", async () => {
-  const cookie = await forgeSession("admin");
+  const cookie = await cookieFor("admin");
   const res = await SELF.fetch("https://x/api/admin/ping", { headers: { cookie } });
   expect(res.status).toBe(200);
 });
@@ -75,19 +37,19 @@ it("GET /api/admin/ping returns 200 for an admin session", async () => {
 it("GET /api/admin/ping returns 200 for a comma-separated multi-role user", async () => {
   // The admin plugin's setRole writes arrays as "admin,reviewer" — the check
   // must match on any role in the list, not the raw string.
-  const cookie = await forgeSession("admin,reviewer");
+  const cookie = await cookieFor("admin,reviewer");
   const res = await SELF.fetch("https://x/api/admin/ping", { headers: { cookie } });
   expect(res.status).toBe(200);
 });
 
 it("GET /api/admin/ping returns 403 for a banned reviewer", async () => {
-  const cookie = await forgeSession("reviewer", { banned: true });
+  const cookie = await cookieFor("reviewer", { banned: true });
   const res = await SELF.fetch("https://x/api/admin/ping", { headers: { cookie } });
   expect(res.status).toBe(403);
 });
 
 it("POST /api/submissions/manual accepts a real better-auth session", async () => {
-  const cookie = await forgeSession("submitter");
+  const cookie = await cookieFor("submitter");
   const res = await SELF.fetch("https://x/api/submissions/manual", {
     method: "POST",
     headers: { "content-type": "application/json", cookie },

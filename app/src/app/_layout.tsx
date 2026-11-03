@@ -19,7 +19,8 @@ export default function RootLayout() {
         <Stack.Screen name="venue/[id]" options={{ title: "Venue" }} />
         <Stack.Screen name="about" options={{ title: "About" }} />
         <Stack.Screen name="submit" options={{ title: "Submit a menu" }} />
-        <Stack.Screen name="admin" options={{ title: "Admin" }} />
+        <Stack.Screen name="admin/index" options={{ title: "Review queue" }} />
+        <Stack.Screen name="admin/review/[id]" options={{ title: "Review submission" }} />
       </Stack>
     </>
   );

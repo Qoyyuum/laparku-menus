@@ -9,6 +9,14 @@ import { Platform } from "react-native";
 
 const API_BASE = (process.env.EXPO_PUBLIC_API_URL ?? "/api").replace(/\/+$/, "");
 
+export { API_BASE };
+
+// The better-auth client appends `/api/auth` itself, so it needs the bare
+// worker origin — API_BASE minus its `/api` suffix. Empty string means
+// "same origin" (the web export is served by the worker); in that case the
+// client resolves window.location.origin, so pass `undefined` instead.
+export const AUTH_ORIGIN = API_BASE.startsWith("http") ? API_BASE.replace(/\/api$/, "") : "";
+
 export async function apiFetch<T = unknown>(path: string, init?: RequestInit): Promise<T> {
   if (Platform.OS !== "web" && API_BASE.startsWith("/")) {
     throw new Error(
@@ -70,6 +78,57 @@ export interface FoodItem {
 export interface SearchResult {
   venues: Venue[];
   items: FoodItem[];
+}
+
+// --- Types mirroring the reviewer surface (src/routes/admin.ts) ------------
+
+export const SOURCE_TYPES = [
+  "menu_pdf",
+  "menu_photo",
+  "product_photo",
+  "barcode",
+  "url",
+  "manual_entry",
+] as const;
+
+// The editable draft item reviewers approve (mirrors DraftItem in
+// src/lib/extractor.ts).
+export interface DraftItem {
+  name: string;
+  name_ms?: string;
+  description?: string;
+  price_bnd?: number;
+  category?: string;
+  item_type: "dish" | "product";
+  brand?: string;
+  barcode?: string;
+  nutrition_estimate?: NutritionEstimate;
+}
+
+export interface ExtractionDraft {
+  has_food_content?: boolean;
+  confidence?: number;
+  venue_guess?: { name: string; type?: string; area?: string } | null;
+  items?: DraftItem[];
+  suspicion?: string[];
+  [key: string]: unknown;
+}
+
+export interface QueueSubmission {
+  id: string;
+  submitter_id: string | null;
+  contact: string | null;
+  source_type: (typeof SOURCE_TYPES)[number];
+  provenance: string;
+  image_keys: string[];
+  raw_extraction: ExtractionDraft | null;
+  confidence: number | null;
+  auto_flags: string[];
+  status: string;
+  rejection_reason: string | null;
+  created_at: number;
+  // Joined from submitters by the admin list endpoint.
+  submitter_trust_tier: "anonymous" | "new" | "trusted" | null;
 }
 
 export function formatBnd(price: number | null): string {
