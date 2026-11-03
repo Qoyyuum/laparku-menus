@@ -14,7 +14,14 @@ export default defineConfig({
       remoteBindings: false,
       wrangler: { configPath: "./wrangler.toml" },
       miniflare: {
-        bindings: { TEST_MIGRATIONS: migrations },
+        bindings: {
+          TEST_MIGRATIONS: migrations,
+          // Tests forge `better-auth.session_token` cookies; an https
+          // PUBLIC_BASE_URL (production value in wrangler.toml) flips
+          // better-auth to __Secure- cookie names and every forged session
+          // 401s. Keep the test env on http — production config unaffected.
+          PUBLIC_BASE_URL: "http://localhost:8787",
+        },
       },
     }),
   ],

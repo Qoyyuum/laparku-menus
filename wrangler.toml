@@ -5,7 +5,11 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 # Doubles as the better-auth baseURL — magic links are built against it.
-PUBLIC_BASE_URL = "http://localhost:8787"
+PUBLIC_BASE_URL = "https://laparku-menus.bbdl.workers.dev"
+# Cloudflare Turnstile site key — replace after creating the widget in the CF
+# dashboard (Security → Turnstile). The matching secret is TURNSTILE_SECRET_KEY.
+# Until set, Turnstile verification is not active.
+TURNSTILE_SITE_KEY = "TODO-create-turnstile-widget"
 # Extraction pipeline: Workers AI vision model + provider selector
 # ("workers-ai" in production; tests override EXTRACTOR with "stub").
 EXTRACTION_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct"
@@ -18,9 +22,8 @@ STALE_NO_VOTES = "3"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "laparku-menus"
-# TODO: run `wrangler d1 create laparku-menus` and paste the real ID before deploy
-database_id = "00000000-0000-0000-0000-000000000000"
+database_name = "laparku-menus-db"
+database_id = "7bd7bcbc-9e86-4736-bafb-c743a9054647"
 
 [[r2_buckets]]
 binding = "SUBMISSIONS"
@@ -43,6 +46,16 @@ not_found_handling = "single-page-application"
 
 [ai]
 binding = "AI"
+
+# Edge rate limiting on write endpoints (POST /api/submissions* and
+# POST /api/items/*/flag): 10 requests per minute per client IP, enforced in
+# src/middleware/rate-limit.ts via the RATE_LIMITER binding. Zone-level WAF
+# rate-limit rules can't apply to a *.workers.dev hostname, so the binding
+# is the Cloudflare-native way to do this without a custom domain.
+[[ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "1001"
+simple = { limit = 10, period = 60 }
 
 # Secrets (TURNSTILE_SECRET_KEY, BETTER_AUTH_SECRET, RESEND_API_KEY) are set via
 # `wrangler secret put` — never in this file.

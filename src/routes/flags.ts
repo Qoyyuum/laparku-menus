@@ -4,6 +4,7 @@ import { getDb } from "../db/client";
 import { food_items, item_flags } from "../db/schema";
 import type { Env } from "../env";
 import { verifyTurnstile } from "../lib/turnstile";
+import { rateLimit } from "../middleware/rate-limit";
 
 // Flag reasons are free text shown to reviewers — bounded so a single
 // report can't dump a megabyte into the admin queue.
@@ -21,7 +22,7 @@ const flagsApi = new Hono<{ Bindings: Env }>();
 // Turnstile rules mirror POST /api/submissions: skipped when the secret
 // isn't configured (dev/tests) and for native app clients — they can't run
 // the web widget, send X-Laparku-Client: app instead.
-flagsApi.post("/items/:id/flag", async (c) => {
+flagsApi.post("/items/:id/flag", rateLimit, async (c) => {
   let body: { reason?: unknown; reporter_contact?: unknown; turnstile_token?: unknown };
   try {
     body = await c.req.json();

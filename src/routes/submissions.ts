@@ -7,6 +7,7 @@ import type { Env } from "../env";
 import { MAX_FILE_BYTES, MAX_FILES, SNIFFED_MIME, sniffMagic } from "../lib/files";
 import { verifyTurnstile } from "../lib/turnstile";
 import { requireAuth, type AuthVariables } from "../middleware/auth";
+import { rateLimit } from "../middleware/rate-limit";
 
 function str(v: unknown): string | undefined {
   return typeof v === "string" && v.trim() !== "" ? v.trim() : undefined;
@@ -208,7 +209,7 @@ const SUBMIT_ROLES = ["submitter", "reviewer", "admin"];
 // POST /api/submissions — authenticated multipart intake. Fields:
 // `files[]`/`files` (jpeg/png/webp/pdf), `source_type`, `provenance`,
 // `turnstile_token` (web), optional `email`.
-submissionsApi.post("/submissions", requireAuth(SUBMIT_ROLES), async (c) => {
+submissionsApi.post("/submissions", rateLimit, requireAuth(SUBMIT_ROLES), async (c) => {
   let form: FormData;
   try {
     // undici-types (via @types/bun) and workers-types disagree on the FormData
@@ -249,7 +250,7 @@ submissionsApi.post("/submissions", requireAuth(SUBMIT_ROLES), async (c) => {
 
 // POST /api/submissions/manual — text-only entry. Requires an authenticated
 // session (requireAuth since phase 2 — was an inline getSession check in v1).
-submissionsApi.post("/submissions/manual", requireAuth(SUBMIT_ROLES), async (c) => {
+submissionsApi.post("/submissions/manual", rateLimit, requireAuth(SUBMIT_ROLES), async (c) => {
   let body: { source_type?: unknown; provenance?: unknown; contact?: unknown; items?: unknown };
   try {
     body = await c.req.json();

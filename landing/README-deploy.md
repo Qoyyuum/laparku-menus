@@ -18,7 +18,7 @@ is created automatically on first deploy if it doesn't exist yet.
 ## Notes
 
 - The menu app URL lives in `<meta name="menu-url">` in `index.html`
-  (currently `https://laparku-menus.workers.dev`). Update that one meta tag to
+  (currently `https://laparku-menus.bbdl.workers.dev`). Update that one meta tag to
   repoint every menu-app link on the page — a small inline script applies it,
   and the anchor `href` fallbacks keep links working without JS.
 - Serve locally to preview: `python -m http.server -d landing` or

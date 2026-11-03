@@ -4,6 +4,9 @@ export interface Env {
   SUBMISSION_QUEUE: Queue;
   AI: Ai;
   ASSETS: Fetcher;
+  // Optional [[ratelimits]] binding — consumed by src/middleware/rate-limit.ts
+  // on write endpoints. Absent in test/local envs that don't declare it.
+  RATE_LIMITER?: RateLimit;
   PUBLIC_BASE_URL: string;
   // Extraction pipeline ([vars]): vision model id + provider selector.
   EXTRACTION_MODEL: string;
