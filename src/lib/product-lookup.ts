@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, lt, sql } from "drizzle-orm";
 import { getDb, type Db } from "../db/client";
 import {
   product_lookup_cache,
@@ -61,7 +61,11 @@ export interface NormalizedCode {
 export function normalizeBarcode(raw: string): NormalizedCode | null {
   const digits = raw.trim();
   if (!/^\d{8,14}$/.test(digits)) return null;
-  const code = digits.replace(/^0+(?=\d{8})/, "");
+  // Leading-zero collapse applies only to 13–14 digit inputs (GTIN-14 /
+  // zero-padded EAN-13), and never below the 12-digit UPC-A width — an
+  // actual 8- or 12-digit code (EAN-8, UPC-E, UPC-A) is already canonical
+  // and must keep a leading number-system 0.
+  const code = digits.length >= 13 ? digits.replace(/^0+(?=\d{12})/, "") : digits;
   const candidates = [code];
   if (code.length === 8) {
     const upcA = upcEToUpcA(code);
@@ -114,23 +118,29 @@ interface Provider {
   fetch: (code: string, env: Env) => Promise<ProviderHit | null>;
 }
 
+// Transport for every provider call. Returns null only for a definitive
+// HTTP 404 ("no such product"). Everything else non-ok — 5xx, provider-side
+// 429s — plus network failures, timeouts and unparseable bodies propagate
+// as thrown errors: the chain treats them as non-answers (provider skipped,
+// and never counted toward a negative cache write).
 async function fetchJson(url: string): Promise<unknown> {
   const res = await fetch(url, {
     headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
     signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
   });
-  if (!res.ok) return null;
-  try {
-    return await res.json();
-  } catch {
-    return null;
-  }
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`provider HTTP ${res.status} for ${url}`);
+  return await res.json();
 }
 
 // Open Food Facts and its sister DBs share the same API shape and ODbL
-// license: api/v0/product/{code}.json → {status:1, product:{...}}.
-// Hosts: world (food), beauty, petfood, products (everything else).
-function offFetch(host: string) {
+// license: {host}/api/v0/product/{code}.json → {status:1, product:{...}}.
+// Each project lives at world.<project>.org — the food DB is
+// world.openfoodfacts.org; the sisters are world.openbeautyfacts.org,
+// world.openpetfoodfacts.org, world.openproductsfacts.org (the
+// <country>.openfoodfacts.org subdomain pattern is food-only).
+function offFetch(providerName: string) {
+  const host = `world.${providerName}.org`;
   return async (code: string): Promise<ProviderHit | null> => {
     const data = (await fetchJson(`https://${host}/api/v0/product/${code}.json`)) as {
       status?: number;
@@ -139,7 +149,7 @@ function offFetch(host: string) {
     if (!data || data.status !== 1 || typeof data.product !== "object" || data.product === null) return null;
     const p = data.product;
     const n = (p.nutriments ?? {}) as Record<string, unknown>;
-    const nutrition: NutritionEstimate = { status: "estimated", source: host };
+    const nutrition: NutritionEstimate = { status: "estimated", source: providerName };
     let hasNutrition = false;
     for (const [nutriment, field] of [
       ["energy-kcal_100g", "calories_kcal"],
@@ -224,10 +234,10 @@ async function barcodelookupFetch(code: string, env: Env): Promise<ProviderHit |
 // first; commercial free tiers (~200/~100/~50 calls/day) only as fallback,
 // each behind its daily budget so a scan storm can't burn the trial.
 const PROVIDERS: Provider[] = [
-  { name: "openfoodfacts", fetch: offFetch("world.openfoodfacts.org") },
-  { name: "openbeautyfacts", fetch: offFetch("beauty.openfoodfacts.org") },
-  { name: "openpetfoodfacts", fetch: offFetch("petfood.openfoodfacts.org") },
-  { name: "openproductsfacts", fetch: offFetch("products.openfoodfacts.org") },
+  { name: "openfoodfacts", fetch: offFetch("openfoodfacts") },
+  { name: "openbeautyfacts", fetch: offFetch("openbeautyfacts") },
+  { name: "openpetfoodfacts", fetch: offFetch("openpetfoodfacts") },
+  { name: "openproductsfacts", fetch: offFetch("openproductsfacts") },
   { name: "eansearch", secret: "EAN_SEARCH_TOKEN", dailyBudget: 190, fetch: eansearchFetch },
   { name: "upcitemdb", secret: "UPCITEMDB_KEY", dailyBudget: 90, fetch: upcitemdbFetch },
   { name: "barcodelookup", secret: "BARCODELookup_KEY", dailyBudget: 45, fetch: barcodelookupFetch },
@@ -240,21 +250,30 @@ function cacheTtlMs(found: boolean, sources: LookupSource[]): number {
 
 // Hard-stops a provider once `limit` calls went out today (UTC). The spend
 // is recorded before the request — a timeout still consumed the attempt.
+// The increment is a single conditional UPDATE (… WHERE calls < limit), so
+// concurrent lookups can't overshoot the cap; a missing row falls back to
+// INSERT … ON CONFLICT DO NOTHING, with one retry to absorb insert races.
 async function spendBudget(db: Db, provider: string, limit: number, day: string): Promise<boolean> {
-  const [row] = await db
-    .select({ calls: provider_budget.calls })
-    .from(provider_budget)
-    .where(and(eq(provider_budget.provider, provider), eq(provider_budget.day, day)))
-    .limit(1);
-  if (row && row.calls >= limit) return false;
-  await db
+  const inc = () =>
+    db
+      .update(provider_budget)
+      .set({ calls: sql`${provider_budget.calls} + 1` })
+      .where(
+        and(
+          eq(provider_budget.provider, provider),
+          eq(provider_budget.day, day),
+          lt(provider_budget.calls, limit),
+        ),
+      )
+      .returning({ calls: provider_budget.calls });
+  if ((await inc()).length > 0) return true;
+  const inserted = await db
     .insert(provider_budget)
     .values({ provider, day, calls: 1 })
-    .onConflictDoUpdate({
-      target: [provider_budget.provider, provider_budget.day],
-      set: { calls: sql`${provider_budget.calls} + 1` },
-    });
-  return true;
+    .onConflictDoNothing()
+    .returning({ calls: provider_budget.calls });
+  if (inserted.length > 0) return true;
+  return (await inc()).length > 0;
 }
 
 /**
@@ -288,6 +307,10 @@ export async function lookupProduct(rawCode: string, env: Env): Promise<LookupRe
   const sources: LookupSource[] = [];
   const complete = () => MERGE_FIELDS.every((f) => product[f] !== undefined);
   const day = new Date(now).toISOString().slice(0, 10);
+  // Whether ≥1 provider call completed with a definitive answer (hit OR
+  // miss). An error/timeout is a non-answer: an all-down burst must not
+  // write a 7-day negative, nor clobber an expired-but-good row below.
+  let responded = false;
 
   for (const provider of PROVIDERS) {
     if (complete()) break;
@@ -299,6 +322,7 @@ export async function lookupProduct(rawCode: string, env: Env): Promise<LookupRe
       }
       try {
         hit = await provider.fetch(candidate, env);
+        responded = true;
       } catch {
         hit = null;
       }
@@ -311,6 +335,20 @@ export async function lookupProduct(rawCode: string, env: Env): Promise<LookupRe
         (product as Record<string, unknown>)[field] = hit[field];
       }
     }
+  }
+
+  if (!responded) {
+    // Total outage — no provider gave an answer. Serve the stale row if we
+    // have one (stale-if-error), never write a cache row, and report a miss
+    // to the caller so the app falls back to the photo flow.
+    if (cached) {
+      return {
+        found: cached.found,
+        ...(cached.found ? { product: cached.merged_payload } : {}),
+        sources: cached.sources,
+      };
+    }
+    return { found: false, sources: [] };
   }
 
   const found = sources.length > 0;
