@@ -3,6 +3,7 @@ import { Link, Tabs, type Href } from "expo-router";
 import type { ComponentProps } from "react";
 import { Pressable, View } from "react-native";
 import { authClient } from "../../auth";
+import { HeaderTitle } from "../../components/HeaderTitle";
 
 type IoniconName = ComponentProps<typeof Ionicons>["name"];
 
@@ -57,7 +58,8 @@ export default function TabsLayout() {
       screenOptions={{
         headerStyle: { backgroundColor: "#047857" },
         headerTintColor: "#fff",
-        headerTitle: "Laparku Menus",
+        // Tappable wordmark → home.
+        headerTitle: () => <HeaderTitle />,
         tabBarActiveTintColor: "#047857",
         headerRight: () => <HeaderLinks />,
       }}

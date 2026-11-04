@@ -1,26 +1,21 @@
-// Scans tab (spec §1/§4, plan Task 5): continuous-decode barcode capture
-// whose capture list IS the submission draft.
+// Scans tab: camera-first continuous-decode barcode capture whose capture
+// list IS the submission draft.
 //
-// Flow: pick a venue (GPS-assisted "Near you" via /api/venues/nearby, with
-// the venue search as manual fallback — GPS is assistive, never enforced) →
-// continuous decode (ScanCamera — expo-camera native, zxing web) → each
-// code resolves asynchronously through /api/products/lookup while the
-// camera keeps running → submit sheet shows found/unknown counts →
-// POST /api/submissions/scan publishes found items trusted (pending-
-// verification badge); unknown codes are never in the batch — per spec
-// they get a per-code "add photos / drop" choice, "add photos" handing off
-// to the parent's product_photo form.
+// Flow: the camera opens immediately — venue is no longer the gate — and
+// fills the free space under a scan-frame/redline overlay → each code
+// resolves asynchronously through /api/products/lookup while the camera
+// keeps running → a bottom toast announces the product name or "couldn't
+// find this product" (+ a manual-fill handoff to the photo form) → the
+// submit sheet is where the venue is picked (GPS "Use my location" →
+// "Near you" preselect, a web-only OSM drag-pin adjust, and the manual
+// venue search) and shows found/unknown counts → POST
+// /api/submissions/scan publishes found items trusted (pending-
+// verification badge); unknown codes are never in the batch — they get a
+// per-code "add photos / drop" choice, "add photos" handing off to the
+// parent's product_photo form.
 //
-// Manual-test checklist (no app-side test infra — plan Task 5 step 4):
-//  - web (expo start --web → /submit → Scans): pick a venue via search,
-//    allow the camera, hold a product barcode up → a row lands in the list
-//    and resolves to a name or "unknown product"; sweeping back over the
-//    same code within ~3 s does not duplicate it.
-//  - deny/block the camera → "type it instead" field still captures.
-//  - submit a mixed batch → response card shows published / queued /
-//    already-on-menu counts.
-//  - native (expo start → device): "Use my location" lists nearby venues
-//    with distance; a new capture vibrates; deny camera → typed fallback.
+// The server still requires venue_id, so Submit stays disabled until a
+// venue is chosen — but never before the camera opens.
 import * as Location from "expo-location";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -44,6 +39,7 @@ import {
   type Venue,
 } from "../api";
 import { ScanCamera } from "./ScanCamera";
+import { VenueMap } from "./VenueMap";
 
 // Prop contract for the platform camera surface (ScanCamera.tsx native,
 // ScanCamera.web.tsx web). Declared here so both files and the tab share
@@ -59,14 +55,36 @@ export interface ScanCameraProps {
   onCode: (code: string, point?: ScanPoint) => void;
 }
 
+// Prop contract for the platform venue-adjust map (VenueMap.web.tsx —
+// Leaflet on web, VenueMap.tsx — null stub on native). Same one-source-
+// of-truth pattern as ScanCameraProps above.
+export interface GeoPoint {
+  lat: number;
+  lng: number;
+  /** Present on fresh GPS fixes → the map recenters AND zooms; pin drags omit it. */
+  zoom?: number;
+}
+export interface VenueMapProps {
+  /** Current pin position. */
+  position: GeoPoint;
+  /** Pin drag or map tap — the picker re-queries nearby venues for the point. */
+  onMove: (p: GeoPoint) => void;
+}
+
 // Spec: the same code within a ~3 s window counts once — sweeping back over
 // a barcode re-confirms rather than re-adding.
 const CODE_THROTTLE_MS = 3_000;
 // On-camera chips linger briefly after their decode so the user sees what
 // was picked up without watching the list.
 const CHIP_TTL_MS = 4_000;
+// The bottom toast hangs around a little longer than a chip — the unknown-
+// code variant carries a "Fill it in" action the user needs time to tap.
+const TOAST_MS = 6_000;
 const NEARBY_LIMIT = 5;
 const SEARCH_LIMIT = 10;
+// The map's resting position before any location lands (Bandar Seri
+// Begawan) — draggable from the start, so no fix is required to use it.
+const DEFAULT_POINT: GeoPoint = { lat: 4.9031, lng: 114.9398 };
 
 type CaptureStatus = "resolving" | "found" | "unknown" | "failed";
 
@@ -90,6 +108,16 @@ interface PickedVenue {
   name: string;
 }
 
+// The bottom scan toast: the last lookup's verdict, with a manual-fill
+// action on misses. "resolving" never reaches it — the on-camera chip
+// already covers the in-flight moment.
+interface ScanToast {
+  code: string;
+  status: "found" | "unknown" | "failed";
+  name?: string;
+  ts: number;
+}
+
 export function ScanTab({
   onAddPhotos,
 }: {
@@ -105,7 +133,7 @@ export function ScanTab({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ScanSubmitResult | null>(null);
-  const [nearAutoPicked, setNearAutoPicked] = useState(false);
+  const [toast, setToast] = useState<ScanToast | null>(null);
 
   // Per-code re-decode throttle — a ref, not state: it's a write-mostly map
   // read inside the decode path and must never schedule renders.
@@ -126,15 +154,29 @@ export function ScanTab({
     return () => clearInterval(t);
   }, []);
 
+  // Toasts dismiss themselves — matched on ts so a newer scan's toast is
+  // never cleared by an older timer.
+  useEffect(() => {
+    if (!toast) return;
+    const ts = toast.ts;
+    const t = setTimeout(() => setToast((cur) => (cur?.ts === ts ? null : cur)), TOAST_MS);
+    return () => clearTimeout(t);
+  }, [toast]);
+
   // Async lookup — never blocks the camera (spec: the capture list shows
-  // "…" while in flight, then the product name or "unknown product").
+  // "…" while in flight, then the product name or "unknown product"). The
+  // verdict also lands on the bottom toast — found shows the name, a miss
+  // offers the manual-fill path.
   const resolve = useCallback(async (code: string) => {
     const patch = (p: Partial<Capture>) =>
       setCaptures((prev) => prev.map((c) => (c.code === code ? { ...c, ...p } : c)));
+    const say = (status: ScanToast["status"], name?: string) =>
+      setToast({ code, status, name, ts: Date.now() });
     // The lookup endpoint validates 8–14 digits; QR/Code-128 payloads that
     // aren't GTINs can never resolve, so they go straight to unknown.
     if (!/^\d{8,14}$/.test(code)) {
       patch({ status: "unknown" });
+      say("unknown");
       return;
     }
     try {
@@ -144,10 +186,12 @@ export function ScanTab({
         product: res.product,
         sourceTags: res.sources.map((s) => s.provider),
       });
+      say(res.found ? "found" : "unknown", res.product?.name);
     } catch {
       // Lookup unavailable — keep the code, mark it so the user can retry
       // by re-scanning, and let the photo path handle it either way.
       patch({ status: "failed" });
+      say("failed");
     }
   }, []);
 
@@ -230,6 +274,8 @@ export function ScanTab({
     lastSeen.current.clear();
     setResult(null);
     setError(null);
+    setVenue(null);
+    setToast(null);
   }
 
   // ---- Post-submit result: the session has ended. ----
@@ -295,45 +341,19 @@ export function ScanTab({
     );
   }
 
-  // ---- Step 1: venue pick (GPS-assisted, manual fallback unchanged). ----
-  if (!venue) {
-    return (
-      <View className="gap-2">
-        <Text className="text-sm leading-6 text-neutral-600">
-          Scan packaged-product barcodes at a venue — every code in the batch attaches to the place
-          you pick first.
-        </Text>
-        <VenuePick
-          onPick={pickVenue}
-          // Auto-pick the closest suggestion only the first time — after a
-          // deliberate "Change", re-locating must show the list so another
-          // nearby venue can be tapped instead of looping back to the same
-          // one.
-          autoPickNearby={!nearAutoPicked}
-          onAutoPick={() => setNearAutoPicked(true)}
-        />
-      </View>
-    );
-  }
-
-  // ---- Step 2: camera + capture list. ----
+  // ---- Camera-first: no venue gate — the picker lives in the submit
+  // sheet, the camera owns the screen from the start. ----
   return (
-    <View className="gap-3">
-      <View className="flex-row items-center justify-between">
-        <View className="flex-1">
-          <Text className="text-sm font-semibold text-neutral-800">Scanning at {venue.name}</Text>
-          <Text className="text-xs text-neutral-500">Every code scanned attaches to this venue.</Text>
-        </View>
-        <Pressable
-          className="rounded-lg border border-neutral-300 bg-white px-3 py-1.5"
-          onPress={() => setVenue(null)}
-        >
-          <Text className="text-sm font-medium text-neutral-700">Change</Text>
-        </Pressable>
-      </View>
-
-      <View className="relative h-72 overflow-hidden rounded-xl bg-black">
+    <View className="flex-1 gap-3">
+      {/* The camera takes every pixel the bottom panel doesn't need — the
+          flex-1 viewport only works because submit.tsx renders this tab
+          outside its ScrollView. */}
+      <View
+        className="relative flex-1 overflow-hidden rounded-xl bg-black"
+        style={{ minHeight: 280 }}
+      >
         <ScanCamera active={!sheetOpen} onCode={handleCode} />
+        <ScanFrame />
         {chips.map((chip) => {
           const cap = captures.find((c) => c.code === chip.code);
           const label = cap?.status === "found" ? (cap.product?.name ?? chip.code) : chip.code;
@@ -349,6 +369,19 @@ export function ScanTab({
             </View>
           );
         })}
+        {toast ? (
+          <ScanToastView
+            toast={toast}
+            onFillIn={
+              onAddPhotos
+                ? () => {
+                    onAddPhotos([toast.code], venue?.name ?? "");
+                    setToast(null);
+                  }
+                : undefined
+            }
+          />
+        ) : null}
       </View>
 
       {/* "Type it instead" — damaged codes, permission-denied, desktop. */}
@@ -381,9 +414,15 @@ export function ScanTab({
         {captures.length} captured — {found.length} identified, {unknown.length} unknown
         {resolving.length > 0 ? `, ${resolving.length} looking up…` : ""}
       </Text>
-      {captures.map((c) => (
-        <CaptureRow key={c.code} capture={c} onRemove={() => removeCode(c.code)} />
-      ))}
+      {captures.length > 0 ? (
+        <ScrollView style={{ maxHeight: 160 }}>
+          <View className="gap-1.5">
+            {captures.map((c) => (
+              <CaptureRow key={c.code} capture={c} onRemove={() => removeCode(c.code)} />
+            ))}
+          </View>
+        </ScrollView>
+      ) : null}
 
       {error ? <Text className="text-sm text-red-600">{error}</Text> : null}
 
@@ -400,8 +439,9 @@ export function ScanTab({
         </Text>
       </Pressable>
 
-      {/* Submit sheet: found/unknown counts, per-item remove, per-code
-          "add photos or drop" for unknowns — then end the session. */}
+      {/* Submit sheet: the venue pick moved here (GPS + web map-adjust +
+          search) alongside found/unknown counts, per-item remove, and the
+          per-code "add photos or drop" choice — then end the session. */}
       <Modal
         visible={sheetOpen}
         transparent
@@ -410,25 +450,35 @@ export function ScanTab({
       >
         <View className="flex-1 justify-end bg-black/50">
           <View className="max-h-[85%] gap-3 rounded-t-2xl bg-white p-4">
-            <Text className="text-base font-bold text-neutral-900">
-              Submit {found.length} scanned product{found.length === 1 ? "" : "s"}
-            </Text>
-            <Text className="text-sm leading-6 text-neutral-600">
-              {found.length} identified — publish{found.length === 1 ? "es" : ""} immediately at{" "}
-              {venue.name} with a pending-verification badge.
-              {unknown.length > 0
-                ? ` ${unknown.length} unknown code${unknown.length === 1 ? "" : "s"} won't be in the batch — add photos or drop each one.`
-                : ""}
-            </Text>
-            {resolving.length > 0 ? (
-              <Text className="text-sm leading-6 text-amber-700">
-                {resolving.length} lookup{resolving.length === 1 ? " is" : "s are"} still resolving —
-                they'll be left out; submit again to add them.
-              </Text>
-            ) : null}
+            {/* shrink: RN's default flexShrink is 0 — without it a tall
+                sheet (map + nearby + captures) overflows the 85% bound
+                and pushes the action buttons off-screen. */}
+            <ScrollView className="min-h-0 shrink">
+              <View className="gap-3">
+                <Text className="text-base font-bold text-neutral-900">
+                  Submit {found.length} scanned product{found.length === 1 ? "" : "s"}
+                </Text>
 
-            <ScrollView className="max-h-72">
-              <View className="gap-2">
+                {/* Venue is a submit-time choice now — the batch needs a
+                    place to attach to, the camera never did. The picker
+                    stays mounted after a pick so the Near-you list, map
+                    pin and search state survive a change of mind. */}
+                <VenuePicker onPick={pickVenue} selected={venue} />
+
+                <Text className="text-sm leading-6 text-neutral-600">
+                  {found.length} identified — publish{found.length === 1 ? "es" : ""} immediately
+                  {venue ? ` at ${venue.name}` : ""} with a pending-verification badge.
+                  {unknown.length > 0
+                    ? ` ${unknown.length} unknown code${unknown.length === 1 ? "" : "s"} won't be in the batch — add photos or drop each one.`
+                    : ""}
+                </Text>
+                {resolving.length > 0 ? (
+                  <Text className="text-sm leading-6 text-amber-700">
+                    {resolving.length} lookup{resolving.length === 1 ? " is" : "s are"} still
+                    resolving — they'll be left out; submit again to add them.
+                  </Text>
+                ) : null}
+
                 {found.map((c) => (
                   <CaptureRow key={c.code} capture={c} onRemove={() => removeCode(c.code)} />
                 ))}
@@ -452,7 +502,7 @@ export function ScanTab({
                       {onAddPhotos ? (
                         <Pressable
                           className="rounded-md bg-emerald-700 px-2.5 py-1"
-                          onPress={() => onAddPhotos([c.code], venue.name)}
+                          onPress={() => onAddPhotos([c.code], venue?.name ?? "")}
                         >
                           <Text className="text-xs font-semibold text-white">Add photos</Text>
                         </Pressable>
@@ -466,23 +516,28 @@ export function ScanTab({
                     </View>
                   </View>
                 ))}
+
+                <TextInput
+                  className="rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm"
+                  value={provenance}
+                  onChangeText={setProvenance}
+                  multiline
+                />
+
+                {error ? <Text className="text-sm text-red-600">{error}</Text> : null}
+                {found.length === 0 ? (
+                  <Text className="text-sm leading-6 text-neutral-600">
+                    Nothing to publish yet — only identified products go into a scan batch. Unknown
+                    codes need photos so a reviewer can see the product.
+                  </Text>
+                ) : null}
+                {!venue && found.length > 0 ? (
+                  <Text className="text-sm leading-6 text-amber-700">
+                    Pick where you are above — the batch needs a venue to attach to.
+                  </Text>
+                ) : null}
               </View>
             </ScrollView>
-
-            <TextInput
-              className="rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm"
-              value={provenance}
-              onChangeText={setProvenance}
-              multiline
-            />
-
-            {error ? <Text className="text-sm text-red-600">{error}</Text> : null}
-            {found.length === 0 ? (
-              <Text className="text-sm leading-6 text-neutral-600">
-                Nothing to publish yet — only identified products go into a scan batch. Unknown
-                codes need photos so a reviewer can see the product.
-              </Text>
-            ) : null}
 
             <View className="flex-row gap-2">
               <Pressable
@@ -493,7 +548,7 @@ export function ScanTab({
               </Pressable>
               <Pressable
                 className="flex-1 items-center rounded-lg bg-emerald-700 px-4 py-2.5 disabled:opacity-50"
-                disabled={busy || found.length === 0}
+                disabled={busy || found.length === 0 || !venue}
                 onPress={() => void confirmSubmit()}
               >
                 <Text className="text-sm font-semibold text-white">
@@ -504,6 +559,59 @@ export function ScanTab({
           </View>
         </View>
       </Modal>
+    </View>
+  );
+}
+
+// The barcode scan-frame overlay: corner brackets around the sweet spot
+// plus the classic red scanline across the middle. Purely decorative —
+// decode coverage is the whole frame, not just the marked area.
+function ScanFrame() {
+  return (
+    <View pointerEvents="none" className="absolute inset-0 items-center justify-center">
+      <View className="relative h-24 w-3/4">
+        <View className="absolute left-0 top-0 h-6 w-6 border-l-4 border-t-4 border-white/90" />
+        <View className="absolute right-0 top-0 h-6 w-6 border-r-4 border-t-4 border-white/90" />
+        <View className="absolute bottom-0 left-0 h-6 w-6 border-b-4 border-l-4 border-white/90" />
+        <View className="absolute bottom-0 right-0 h-6 w-6 border-b-4 border-r-4 border-white/90" />
+        <View
+          className="absolute left-0 right-0 h-0.5 bg-red-500"
+          style={{ top: "50%", marginTop: -1 }}
+        />
+      </View>
+    </View>
+  );
+}
+
+// Bottom toast for the last lookup verdict: found → the product name;
+// miss → "couldn't find this product" + the manual-fill handoff;
+// failed → re-scan hint. Overlays the camera's lower edge.
+function ScanToastView({ toast, onFillIn }: { toast: ScanToast; onFillIn?: () => void }) {
+  if (toast.status === "found") {
+    return (
+      <View className="absolute inset-x-3 bottom-3 rounded-xl bg-emerald-800/95 px-3 py-2.5">
+        <Text className="text-sm font-semibold text-white" numberOfLines={2}>
+          ✓ {toast.name ?? "Product found"}
+        </Text>
+      </View>
+    );
+  }
+  return (
+    <View className="absolute inset-x-3 bottom-3 gap-1 rounded-xl bg-neutral-900/90 px-3 py-2.5">
+      <Text className="text-sm font-semibold text-white">
+        {toast.status === "failed"
+          ? "Couldn't reach the product database — re-scan to retry"
+          : "Couldn't find this product"}
+      </Text>
+      <Text className="text-xs text-neutral-300">{toast.code}</Text>
+      {toast.status === "unknown" && onFillIn ? (
+        <Pressable
+          className="mt-1 self-start rounded-md bg-emerald-700 px-2.5 py-1.5"
+          onPress={onFillIn}
+        >
+          <Text className="text-xs font-semibold text-white">Fill it in manually</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -553,25 +661,66 @@ function CaptureRow({ capture, onRemove }: { capture: Capture; onRemove: () => v
   );
 }
 
-// Venue pick (spec §4): "Use my location" → /api/venues/nearby → "Near you"
-// top-5 with distance; permission denied or empty → the venue search below
-// is the unchanged manual fallback. GPS is assistive, never enforced.
-function VenuePick({
+// Venue pick, submit-time edition (spec §3): "Use my location" →
+// /api/venues/nearby → "Near you" top-5 with the closest preselected;
+// on web an OSM map with a draggable pin re-queries the list for wherever
+// the pin lands; the venue search stays the manual fallback — and now
+// says so when a search comes up empty or fails instead of looking dead.
+function VenuePicker({
   onPick,
-  autoPickNearby,
-  onAutoPick,
+  selected,
 }: {
   onPick: (v: PickedVenue) => void;
-  /** Preselect the closest "Near you" hit (spec §4) — first locate only. */
-  autoPickNearby: boolean;
-  onAutoPick?: () => void;
+  selected?: PickedVenue | null;
 }) {
+  const selectedId = selected?.id;
+  const [pos, setPos] = useState<GeoPoint>(DEFAULT_POINT);
+  const [located, setLocated] = useState(false);
   const [nearby, setNearby] = useState<NearbyVenue[] | null>(null);
   const [locating, setLocating] = useState(false);
   const [locMsg, setLocMsg] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Venue[]>([]);
   const [searching, setSearching] = useState(false);
+  const [searched, setSearched] = useState(false);
+  const [searchErr, setSearchErr] = useState<string | null>(null);
+  // The venue id we last auto-preselected — the refresh may preselect the
+  // closest hit again only when nothing (or only that auto-pick) is
+  // selected, so a deliberate tap is never clobbered by a pin drag.
+  const lastAuto = useRef<string | null>(null);
+  // Debounce callbacks see the latest selection/props without re-binding.
+  const selectedRef = useRef(selectedId);
+  const onPickRef = useRef(onPick);
+  useEffect(() => {
+    selectedRef.current = selectedId;
+    onPickRef.current = onPick;
+  });
+
+  // GPS fixes and pin moves funnel into one debounced nearby refresh.
+  useEffect(() => {
+    if (!located) return;
+    const t = setTimeout(() => {
+      void (async () => {
+        try {
+          const list = await nearbyVenues(pos.lat, pos.lng, NEARBY_LIMIT);
+          setNearby(list);
+          const top = list[0];
+          if (top && (!selectedRef.current || selectedRef.current === lastAuto.current)) {
+            lastAuto.current = top.id;
+            onPickRef.current(top);
+          }
+          setLocMsg(
+            list.length === 0
+              ? "No venues within ~500 m of this point — drag the pin or search below."
+              : null,
+          );
+        } catch {
+          setLocMsg("Couldn't load venues near that point — search below instead.");
+        }
+      })();
+    }, 400);
+    return () => clearTimeout(t);
+  }, [located, pos]);
 
   async function useMyLocation() {
     setLocating(true);
@@ -589,19 +738,15 @@ function VenuePick({
           return;
         }
       }
-      const pos = await Location.getCurrentPositionAsync({
+      const fix = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
       });
-      const list = await nearbyVenues(pos.coords.latitude, pos.coords.longitude, NEARBY_LIMIT);
-      setNearby(list);
-      if (list.length === 0) {
-        setLocMsg("No venues within ~500 m — search below.");
-      } else if (autoPickNearby) {
-        // Spec §4: the closest suggestion is preselected — the user can
-        // still hit "Change" for another nearby venue or the search.
-        onAutoPick?.();
-        onPick(list[0]!);
-      }
+      // An explicit locate re-arms the auto-preselect: whatever is selected
+      // counts as "auto" for the refresh this fix triggers, so the new
+      // closest hit wins (spec §4).
+      lastAuto.current = selectedRef.current ?? null;
+      setPos({ lat: fix.coords.latitude, lng: fix.coords.longitude, zoom: 16 });
+      setLocated(true);
     } catch {
       setLocMsg("Couldn't get your location — search for the venue below instead.");
     } finally {
@@ -609,23 +754,39 @@ function VenuePick({
     }
   }
 
+  const handleMapMove = useCallback((p: GeoPoint) => {
+    setPos({ lat: p.lat, lng: p.lng });
+    setLocated(true);
+  }, []);
+
   // Debounced venue search — the manual fallback, also the path for venues
-  // with no geo on record (a shelf sweep there still scans fine).
+  // with no geo on record. Empty and failed searches both get a visible
+  // state: the old version rendered nothing in either case, which is what
+  // made typing into this box look dead.
   useEffect(() => {
     const q = query.trim();
+    setSearched(false);
     if (q.length < 2) {
       setResults([]);
+      setSearching(false);
+      setSearchErr(null);
       return;
     }
     let dead = false;
     const t = setTimeout(() => {
       setSearching(true);
+      setSearchErr(null);
       apiFetch<{ venues: Venue[] }>(`/venues?q=${encodeURIComponent(q)}`)
         .then((res) => {
-          if (!dead) setResults(res.venues.slice(0, SEARCH_LIMIT));
+          if (dead) return;
+          setResults(res.venues.slice(0, SEARCH_LIMIT));
+          setSearched(true);
         })
         .catch(() => {
-          if (!dead) setResults([]);
+          if (dead) return;
+          setResults([]);
+          setSearched(true);
+          setSearchErr("Venue search didn't go through — check the connection and try again.");
         })
         .finally(() => {
           if (!dead) setSearching(false);
@@ -637,9 +798,20 @@ function VenuePick({
     };
   }, [query]);
 
+  const trimmedQuery = query.trim();
+
   return (
     <View className="gap-3">
       <Text className="text-sm font-semibold text-neutral-800">Where are you scanning?</Text>
+
+      {selected ? (
+        <View className="rounded-lg border border-emerald-700 bg-emerald-50 px-3 py-2">
+          <Text className="text-sm font-semibold text-emerald-900">{selected.name} ✓</Text>
+          <Text className="text-xs text-emerald-800">
+            Every submitted item attaches here — tap another venue below to change.
+          </Text>
+        </View>
+      ) : null}
 
       <Pressable
         className="items-center rounded-lg border border-emerald-700 bg-white px-3 py-2"
@@ -652,6 +824,18 @@ function VenuePick({
       </Pressable>
       {locMsg ? <Text className="text-xs text-neutral-500">{locMsg}</Text> : null}
 
+      {/* Map adjust is web-only — Leaflet needs the DOM; native keeps the
+          GPS + search paths (VenueMap.tsx is a null stub there). */}
+      {Platform.OS === "web" ? (
+        <View className="gap-1.5">
+          <VenueMap position={pos} onMove={handleMapMove} />
+          <Text className="text-xs text-neutral-500">
+            Off by a bit? Drag the pin — or tap the map — to where you're standing. Nearby venues
+            update automatically.
+          </Text>
+        </View>
+      ) : null}
+
       {nearby && nearby.length > 0 ? (
         <View className="gap-1.5">
           <Text className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
@@ -660,7 +844,11 @@ function VenuePick({
           {nearby.map((v) => (
             <Pressable
               key={v.id}
-              className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2"
+              className={`rounded-lg border px-3 py-2 ${
+                selectedId === v.id
+                  ? "border-emerald-700 bg-emerald-100"
+                  : "border-emerald-200 bg-emerald-50"
+              }`}
               onPress={() => onPick(v)}
             >
               <Text className="text-sm font-semibold text-neutral-900">{v.name}</Text>
@@ -679,6 +867,16 @@ function VenuePick({
         onChangeText={setQuery}
       />
       {searching ? <Text className="text-xs text-neutral-500">Searching…</Text> : null}
+      {trimmedQuery.length === 1 ? (
+        <Text className="text-xs text-neutral-400">Keep typing — search starts at 2 letters.</Text>
+      ) : null}
+      {searchErr ? <Text className="text-xs text-red-600">{searchErr}</Text> : null}
+      {searched && !searchErr && results.length === 0 ? (
+        <Text className="text-xs text-neutral-500">
+          No venues found for "{trimmedQuery}" — check the name, or drop the pin where you are and
+          see what's nearby.
+        </Text>
+      ) : null}
       {results.map((v) => (
         <Pressable
           key={v.id}

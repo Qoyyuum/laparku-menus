@@ -2,6 +2,7 @@ import "../global.css";
 
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import { HeaderTitle } from "../components/HeaderTitle";
 
 export default function RootLayout() {
   return (
@@ -11,7 +12,8 @@ export default function RootLayout() {
         screenOptions={{
           headerStyle: { backgroundColor: "#047857" },
           headerTintColor: "#fff",
-          headerTitle: "Laparku Menus",
+          // Tappable wordmark → home (cancels data entry).
+          headerTitle: () => <HeaderTitle />,
         }}
       >
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />

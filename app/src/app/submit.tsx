@@ -177,14 +177,17 @@ function SubmitForm() {
   // Miss-path handoff (spec §3): unknown scan codes switch to the
   // product-photo form with the digits carried in provenance so a reviewer
   // can match them against the photo. The tag always appends — a stale
-  // provenance draft must not swallow the digits.
+  // provenance draft must not swallow the digits. The venue name is empty
+  // when the handoff comes from the camera toast — venue is a submit-time
+  // pick now, so scans can happen before one is chosen.
   function addPhotosForCode(codes: string[], venueName: string) {
     setMode("form");
     setSourceType("product_photo");
+    const where = venueName ? ` at ${venueName}` : "";
     const tag =
       codes.length === 1
-        ? `Barcode: ${codes[0]} — product photo at ${venueName}`
-        : `Barcodes: ${codes.join(", ")} — product photos at ${venueName}`;
+        ? `Barcode: ${codes[0]} — product photo${where}`
+        : `Barcodes: ${codes.join(", ")} — product photos${where}`;
     setProvenance((p) => (p.trim() ? `${p.trim()}\n${tag}` : tag));
     setMessage(null);
   }
@@ -253,6 +256,45 @@ function SubmitForm() {
     }
   }
 
+  // Mode tabs: the classic photo/file form vs the continuous-decode
+  // scanner. Scanning is the packaged-product path — menus and dishes
+  // stay on the photo form.
+  const modeTabs = (
+    <View className="flex-row rounded-lg border border-neutral-300 bg-white p-1">
+      {(["form", "scan"] as const).map((m) => (
+        <Pressable
+          key={m}
+          className={`flex-1 items-center rounded-md px-3 py-1.5 ${
+            mode === m ? "bg-emerald-700" : ""
+          }`}
+          onPress={() => setMode(m)}
+        >
+          <Text
+            className={`text-sm font-semibold ${mode === m ? "text-white" : "text-neutral-700"}`}
+          >
+            {m === "form" ? "Photos / files" : "Scans"}
+          </Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+
+  // Camera-first scans: the tab leaves the page ScrollView so the camera
+  // gets a real flex-1 viewport instead of a fixed-height sliver inside
+  // page scroll (spec §1 — "as big and wide as possible"). The capture
+  // list scrolls inside the tab itself.
+  if (mode === "scan") {
+    return (
+      <View className="flex-1 gap-3 bg-neutral-50 p-4">
+        <View className="flex-row items-center gap-3">
+          <Text className="text-lg font-bold text-neutral-900">Scans</Text>
+          <View className="flex-1">{modeTabs}</View>
+        </View>
+        <ScanTab onAddPhotos={addPhotosForCode} />
+      </View>
+    );
+  }
+
   return (
     <ScrollView className="flex-1 bg-neutral-50" contentContainerClassName="gap-4 p-4">
       <Text className="text-xl font-bold text-neutral-900">Submit a menu</Text>
@@ -262,31 +304,8 @@ function SubmitForm() {
         else is checked by a reviewer first.
       </Text>
 
-      {/* Mode tabs: the classic photo/file form vs the continuous-decode
-          scanner. Scanning is the packaged-product path — menus and dishes
-          stay on the photo form. */}
-      <View className="flex-row rounded-lg border border-neutral-300 bg-white p-1">
-        {(["form", "scan"] as const).map((m) => (
-          <Pressable
-            key={m}
-            className={`flex-1 items-center rounded-md px-3 py-1.5 ${
-              mode === m ? "bg-emerald-700" : ""
-            }`}
-            onPress={() => setMode(m)}
-          >
-            <Text
-              className={`text-sm font-semibold ${mode === m ? "text-white" : "text-neutral-700"}`}
-            >
-              {m === "form" ? "Photos / files" : "Scans"}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
+      {modeTabs}
 
-      {mode === "scan" ? (
-        <ScanTab onAddPhotos={addPhotosForCode} />
-      ) : (
-        <>
       <View className="gap-1.5">
         <Text className="text-sm font-semibold text-neutral-800">What are you submitting?</Text>
         <View className="flex-row flex-wrap gap-2">
@@ -421,8 +440,6 @@ function SubmitForm() {
       >
         <Text className="text-base font-semibold text-white">{busy ? "Uploading…" : "Submit"}</Text>
       </Pressable>
-        </>
-      )}
 
       {/* Tap a thumbnail to inspect it full-size before submitting — tap the
           backdrop or the X to dismiss. */}
