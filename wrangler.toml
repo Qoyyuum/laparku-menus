@@ -18,6 +18,9 @@ EXTRACTOR = "workers-ai"
 # for STALE_MONTHS (or never verified) or when STALE_NO_VOTES distinct
 # users vote "not accurate" since the last verification.
 STALE_MONTHS = "6"
+# Transactional-mail sender — the from-domain must be onboarded to Cloudflare
+# Email Sending (see the [[send_email]] note below).
+AUTH_EMAIL_FROM = "Laparku <no-reply@laparku.co.bn>"
 STALE_NO_VOTES = "3"
 
 [[d1_databases]]
@@ -68,11 +71,12 @@ simple = { limit = 10, period = 60 }
 
 # Cloudflare Email Service — transactional email (sign-in magic links +
 # submission notifications) via env.EMAIL; no API key needed. The
-# from-domain (AUTH_EMAIL_FROM var, or the default no-reply@laparku.com in
-# src/lib/notify.ts) must be onboarded to Email Sending — `wrangler email
-# sending enable <domain>` or Dashboard → Email Service. `wrangler dev`
-# simulates the binding: messages are written to a file whose path is
-# logged, not delivered.
+# from-domain (AUTH_EMAIL_FROM above, no-reply@laparku.co.bn) must be
+# onboarded to Email Sending — Dashboard → Compute → Email Service →
+# Email Sending → Onboard Domain → laparku.co.bn (the API/token path
+# needs an Email Sending: Edit scope the local tokens lack). `wrangler
+# dev` simulates the binding: messages are written to a file whose path
+# is logged, not delivered.
 [[send_email]]
 name = "EMAIL"
 
