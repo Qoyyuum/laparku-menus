@@ -1,7 +1,7 @@
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import { useEffect, useState } from "react";
-import { Image, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Image, Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { API_BASE, SOURCE_TYPES } from "../api";
 import { getAuthCookie } from "../auth";
 import { SignInGate } from "../components/SignInGate";
@@ -71,6 +71,7 @@ function SubmitForm() {
   const [provenance, setProvenance] = useState("");
   const [email, setEmail] = useState("");
   const [files, setFiles] = useState<PickedFile[]>([]);
+  const [previewUri, setPreviewUri] = useState<string | null>(null);
   const [turnstileToken, setTurnstileToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -294,11 +295,16 @@ function SubmitForm() {
               {files.map((f, i) => (
                 <View key={`${f.uri}-${i}`} className="relative mr-2">
                   {f.mimeType?.startsWith("image/") || !f.mimeType ? (
-                    <Image
-                      source={{ uri: f.uri }}
-                      className="h-20 w-20 rounded-lg border border-neutral-200"
-                      resizeMode="cover"
-                    />
+                    <Pressable
+                      accessibilityLabel={`Enlarge preview of ${f.name}`}
+                      onPress={() => setPreviewUri(f.uri)}
+                    >
+                      <Image
+                        source={{ uri: f.uri }}
+                        className="h-20 w-20 rounded-lg border border-neutral-200"
+                        resizeMode="cover"
+                      />
+                    </Pressable>
                   ) : (
                     <View className="h-20 w-20 items-center justify-center rounded-lg border border-neutral-200 bg-neutral-100">
                       <Text className="text-xs font-semibold text-neutral-600">PDF</Text>
@@ -368,6 +374,36 @@ function SubmitForm() {
       >
         <Text className="text-base font-semibold text-white">{busy ? "Uploading…" : "Submit"}</Text>
       </Pressable>
+
+      {/* Tap a thumbnail to inspect it full-size before submitting — tap the
+          backdrop or the X to dismiss. */}
+      <Modal
+        visible={previewUri !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPreviewUri(null)}
+      >
+        <Pressable
+          className="flex-1 items-center justify-center bg-black/80 p-4"
+          accessibilityLabel="Close preview"
+          onPress={() => setPreviewUri(null)}
+        >
+          {previewUri ? (
+            <Image
+              source={{ uri: previewUri }}
+              className="h-full w-full"
+              resizeMode="contain"
+            />
+          ) : null}
+          <Pressable
+            className="absolute right-4 top-4 h-9 w-9 items-center justify-center rounded-full bg-white/20"
+            accessibilityLabel="Close preview"
+            onPress={() => setPreviewUri(null)}
+          >
+            <Text className="text-lg font-bold text-white">×</Text>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </ScrollView>
   );
 }
