@@ -10,6 +10,7 @@ import coverageApi from "./routes/coverage";
 import flagsApi from "./routes/flags";
 import leaderboardsApi from "./routes/leaderboards";
 import meApi from "./routes/me";
+import productsApi from "./routes/products";
 import publicApi from "./routes/public";
 import submissionsApi from "./routes/submissions";
 import verifyApi from "./routes/verify";
@@ -29,6 +30,7 @@ app.route("/api", leaderboardsApi);
 app.route("/api", meApi);
 app.route("/api", badgesApi);
 app.route("/api", coverageApi);
+app.route("/api", productsApi);
 app.route("/api/admin", adminApi);
 
 export default {

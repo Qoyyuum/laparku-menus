@@ -1,4 +1,4 @@
-import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 // Machine estimate vs reviewer-verified nutrition (spec: `nutrition_estimate`).
 export interface NutritionEstimate {
@@ -326,6 +326,53 @@ export const item_flags = sqliteTable(
   (t) => [index("item_flags_item_idx").on(t.item_id), index("item_flags_status_idx").on(t.status)],
 );
 
+// Normalized product payload stored in product_lookup_cache.merged_payload
+// and returned by /api/products/lookup — see src/lib/product-lookup.ts.
+export interface LookupProduct {
+  name?: string;
+  brand?: string;
+  package_size?: string;
+  nutrition_estimate?: NutritionEstimate;
+  image_url?: string;
+}
+
+// Provenance for a lookup hit: which provider recognized the barcode, plus
+// its (public, secret-free) product page when the provider exposes one.
+export interface LookupSource {
+  provider: string;
+  url?: string;
+}
+
+// Barcode→product lookup cache (spec §2). One row per normalized code.
+// `sources` also feeds the read-time TTL decision (OFF-family-only answers
+// cache 30d, anything containing a commercial source 24h, negatives 7d —
+// computed in src/lib/product-lookup.ts, no TTL column). Per-provider call
+// budgets live in provider_budget instead of being derived from `sources`:
+// `sources` records only providers that *recognized* the code, so misses
+// and errors would undercount the spend.
+export const product_lookup_cache = sqliteTable("product_lookup_cache", {
+  code: text("code").primaryKey(),
+  merged_payload: text("merged_payload", { mode: "json" }).$type<LookupProduct>().notNull(),
+  sources: text("sources", { mode: "json" }).$type<LookupSource[]>().notNull(),
+  found: integer("found", { mode: "boolean" }).notNull(),
+  fetched_at: integer("fetched_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+// Per-provider outbound-call counter, one row per (provider, UTC day).
+// Commercial free tiers are tiny (ean-search ~200/day, upcitemdb ~100/day,
+// barcodelookup ~50/day); product-lookup hard-stops a provider once its
+// daily budget is spent rather than burning the trial. OFF-family is
+// unlimited and never writes rows here.
+export const provider_budget = sqliteTable(
+  "provider_budget",
+  {
+    provider: text("provider").notNull(),
+    day: text("day").notNull(),
+    calls: integer("calls").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.provider, t.day] })],
+);
+
 export type Venue = typeof venues.$inferSelect;
 export type NewVenue = typeof venues.$inferInsert;
 export type FoodItem = typeof food_items.$inferSelect;
@@ -347,3 +394,5 @@ export type NewVenueRequest = typeof venue_requests.$inferInsert;
 export type UserBadge = typeof user_badges.$inferSelect;
 export type NewUserBadge = typeof user_badges.$inferInsert;
 export type RevisionMode = (typeof REVISION_MODES)[number];
+export type ProductLookupCacheRow = typeof product_lookup_cache.$inferSelect;
+export type ProviderBudgetRow = typeof provider_budget.$inferSelect;

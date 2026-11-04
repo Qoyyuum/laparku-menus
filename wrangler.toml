@@ -66,5 +66,7 @@ name = "RATE_LIMITER"
 namespace_id = "1001"
 simple = { limit = 10, period = 60 }
 
-# Secrets (TURNSTILE_SECRET_KEY, BETTER_AUTH_SECRET, RESEND_API_KEY) are set via
+# Secrets (TURNSTILE_SECRET_KEY, BETTER_AUTH_SECRET, RESEND_API_KEY, plus the
+# optional product-lookup provider keys EAN_SEARCH_TOKEN / UPCITEMDB_KEY /
+# BARCODELookup_KEY — unset keys just skip that provider) are set via
 # `wrangler secret put` — never in this file.

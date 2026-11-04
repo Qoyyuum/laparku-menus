@@ -24,4 +24,9 @@ export interface Env {
   // since the last verification. Defaults 6 / 3 when unset or unparsable.
   STALE_MONTHS?: string;
   STALE_NO_VOTES?: string;
+  // Product-lookup chain secrets (`wrangler secret put`; absent in tests →
+  // that provider is skipped). See src/lib/product-lookup.ts.
+  EAN_SEARCH_TOKEN?: string;
+  UPCITEMDB_KEY?: string;
+  BARCODELookup_KEY?: string;
 }
