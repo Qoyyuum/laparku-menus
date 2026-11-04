@@ -215,6 +215,21 @@
           "autoincrement": false,
           "default": true
         },
+        "pending_verification": {
+          "name": "pending_verification",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "barcode_source": {
+          "name": "barcode_source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "status": {
           "name": "status",
           "type": "text",
@@ -561,6 +576,20 @@
           "notNull": true,
           "autoincrement": false,
           "default": "'pending'"
+        },
+        "scan_barcode": {
+          "name": "scan_barcode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "publish_mode": {
+          "name": "publish_mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         },
         "rejection_reason": {
           "name": "rejection_reason",

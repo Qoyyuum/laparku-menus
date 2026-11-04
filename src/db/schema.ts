@@ -28,7 +28,19 @@ export const HALAL_STATUSES = ["halal-certified", "muslim-owned", "non-halal", "
 export const VENUE_VERIFICATIONS = ["unverified", "verified", "claimed-by-owner"] as const;
 export const ITEM_TYPES = ["dish", "product"] as const;
 export const SOURCE_TYPES = ["menu_pdf", "menu_photo", "product_photo", "barcode", "url", "manual_entry"] as const;
-export const SUBMISSION_STATUSES = ["pending", "pending_review", "auto_rejected", "rejected", "approved"] as const;
+export const SUBMISSION_STATUSES = [
+  "pending",
+  "pending_review",
+  "auto_rejected",
+  "rejected",
+  "approved",
+  // Scan-intake trusted path: items went live immediately (pending the
+  // reviewer double-check) — no approval stage preceded the publish.
+  "trusted_published",
+] as const;
+// How the submission's items reached the public menu: a reviewer decided
+// ("reviewed") or the scan intake trusted-published them ("trusted").
+export const PUBLISH_MODES = ["reviewed", "trusted"] as const;
 export const REVISION_MODES = ["replace", "merge"] as const;
 export const VENUE_REQUEST_STATUSES = ["open", "fulfilled"] as const;
 
@@ -111,6 +123,12 @@ export const submissions = sqliteTable(
       .notNull()
       .$defaultFn(() => []),
     status: text("status", { enum: SUBMISSION_STATUSES }).notNull().default("pending"),
+    // Scan-intake provenance: the first/primary barcode of the batch
+    // (digits — audit trail for scan submissions; NULL on every other
+    // source). `publish_mode` records whether the items reached the menu
+    // via a reviewer decision or the trusted-publish path.
+    scan_barcode: text("scan_barcode"),
+    publish_mode: text("publish_mode", { enum: PUBLISH_MODES }),
     rejection_reason: text("rejection_reason"),
     reviewer_id: text("reviewer_id"),
     created_at: createdAt(),
@@ -178,6 +196,12 @@ export const food_items = sqliteTable(
     // superseded_by) on items a revision drops. Defaults true so a plain
     // insert is live, matching the v1 "published + unsuperseded" semantics.
     is_current: integer("is_current", { mode: "boolean" }).notNull().default(true),
+    // Trusted-published scan items go live behind this badge until a
+    // reviewer clears it (verify) or unpublishes — see spec §5.
+    pending_verification: integer("pending_verification", { mode: "boolean" }).notNull().default(false),
+    // JSON array of provider names that supplied the scan item's data
+    // (e.g. ["openfoodfacts","eansearch"]) — provenance for reviewers.
+    barcode_source: text("barcode_source", { mode: "json" }).$type<string[]>(),
     status: text("status", { enum: ["published", "superseded", "hidden"] }).notNull().default("published"),
     created_at: createdAt(),
     updated_at: updatedAt(),

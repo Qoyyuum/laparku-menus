@@ -39,8 +39,10 @@ export interface IntakeFile {
 // Submitter resolution shared by all intake paths: `authUserId` (session or
 // verified API key → submitters.auth_user_id) takes precedence; `email` is
 // the anonymous path (submitters.identifier). Returns the row, or an
-// IntakeResult early-exit (blocked submitter).
-async function resolveSubmitter(
+// IntakeResult early-exit (blocked submitter). Exported for the scan intake
+// (src/lib/trusted-publish.ts) so every write path ties rows to the same
+// submitter identity.
+export async function resolveSubmitter(
   db: Db,
   { authUserId, email }: { authUserId?: string; email?: string },
 ): Promise<{ submitter?: Submitter; error?: IntakeResult }> {

@@ -12,3 +12,11 @@ CREATE TABLE `provider_budget` (
 	`calls` integer DEFAULT 0 NOT NULL,
 	PRIMARY KEY(`provider`, `day`)
 );
+--> statement-breakpoint
+ALTER TABLE `submissions` ADD `scan_barcode` text;
+--> statement-breakpoint
+ALTER TABLE `submissions` ADD `publish_mode` text;
+--> statement-breakpoint
+ALTER TABLE `food_items` ADD `pending_verification` integer DEFAULT false NOT NULL;
+--> statement-breakpoint
+ALTER TABLE `food_items` ADD `barcode_source` text;

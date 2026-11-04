@@ -26,11 +26,28 @@ function priceCompatible(draftPrice: number | undefined, existingPrice: number |
   return Math.abs(draftPrice - existingPrice) <= PRICE_TOLERANCE * existingPrice;
 }
 
-// Pre-match each draft item against the venue's existing menu by normalized
-// name + price proximity. When several existing items share the name, the
-// closest price wins; a draft with no candidate gets existingItemId: null.
+// Comparison key for packaged products: whitespace/case don't distinguish
+// codes, but every digit does (no fuzzy matching — a digit off is a
+// different product).
+export function normalizeBarcodeForMatch(barcode: string): string {
+  return barcode.trim();
+}
+
+// Pre-match each draft item against the venue's existing menu. Match keys
+// in strength order (spec §7): exact barcode equality is the strongest
+// signal — it outranks normalized-name+price similarity entirely, because a
+// scanned code identifies the product exactly while names/prices drift.
+// Within the name+price tier, when several existing items share the name,
+// the closest price wins; a draft with no candidate gets existingItemId:
+// null.
 export function matchItems(drafts: DraftItem[], existing: FoodItem[]): MatchSuggestion[] {
   return drafts.map((draft, draftIndex) => {
+    const barcode = draft.barcode ? normalizeBarcodeForMatch(draft.barcode) : "";
+    if (barcode) {
+      const hit = existing.find((i) => i.barcode !== null && normalizeBarcodeForMatch(i.barcode) === barcode);
+      if (hit) return { draftIndex, existingItemId: hit.id };
+    }
+
     const key = normalizeItemName(draft.name);
     let best: FoodItem | null = null;
     let bestDiff = Number.POSITIVE_INFINITY;

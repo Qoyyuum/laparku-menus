@@ -13,6 +13,7 @@ import meApi from "./routes/me";
 import nearbyApi from "./routes/nearby";
 import productsApi from "./routes/products";
 import publicApi from "./routes/public";
+import scanApi from "./routes/scan";
 import submissionsApi from "./routes/submissions";
 import verifyApi from "./routes/verify";
 
@@ -33,6 +34,7 @@ app.route("/api", badgesApi);
 app.route("/api", coverageApi);
 app.route("/api", nearbyApi);
 app.route("/api", productsApi);
+app.route("/api", scanApi);
 app.route("/api/admin", adminApi);
 
 export default {
