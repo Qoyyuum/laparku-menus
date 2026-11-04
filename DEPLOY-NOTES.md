@@ -39,10 +39,13 @@ npx wrangler pages deploy landing --project-name=laparku
 | Secret | Status |
 |---|---|
 | `BETTER_AUTH_SECRET` | ✅ set (generated, 2× UUID) |
-| `RESEND_API_KEY` | ❌ not set — magic links log instead of sending, approval emails skipped |
 | `TURNSTILE_SECRET_KEY` | ❌ not set — server-side Turnstile checks are skipped while unset |
 
 `TURNSTILE_SITE_KEY` in `[vars]` is a placeholder (`TODO-create-turnstile-widget`).
+
+Email moved off Resend onto the `send_email` binding (`EMAIL` in
+`wrangler.toml`) — no secret. The from-domain must be onboarded to Email
+Sending before magic links/notification emails go out (manual step 1).
 
 ## Rate limiting
 
@@ -88,9 +91,13 @@ Empty result sets are expected — fresh database, no approved submissions yet.
 
 ## Remaining manual steps (need the user)
 
-1. **`wrangler secret put RESEND_API_KEY`** — needs their Resend API key.
-   Until set, magic-link emails only log and approval notification emails are
-   skipped.
+1. **Onboard the from-domain to Email Sending** — `wrangler email sending
+   enable laparku.com` (or Dashboard → Email Service), so the `EMAIL`
+   binding can send from `no-reply@laparku.com` (override the sender with
+   the `AUTH_EMAIL_FROM` var if a different onboarded domain is wanted).
+   Until onboarded, `send()` rejects (`E_SENDER_DOMAIN_NOT_AVAILABLE` /
+   `E_SENDER_NOT_VERIFIED`): magic-link requests error out and notification
+   emails are skipped (logged only).
 2. **Turnstile widget + `wrangler secret put TURNSTILE_SECRET_KEY`** — create a
    widget in the CF dashboard (Security → Turnstile) for
    `laparku-menus.bbdl.workers.dev`, put the site key in `[vars]`

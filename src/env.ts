@@ -14,9 +14,14 @@ export interface Env {
   EXTRACTOR: string;
   TURNSTILE_SECRET_KEY: string;
   BETTER_AUTH_SECRET: string;
-  RESEND_API_KEY: string;
-  // From-address for magic-link emails (optional [vars]; falls back to a
-  // no-reply@laparku.com default in src/auth.ts).
+  // Cloudflare Email Service send_email binding ([[send_email]] in
+  // wrangler.toml) — magic links + notification emails. Optional like
+  // RATE_LIMITER: absent in envs that don't declare it → sendEmail() logs
+  // and no-ops.
+  EMAIL?: SendEmail;
+  // From-address for outbound email (optional [vars]; falls back to a
+  // no-reply@laparku.com default in src/lib/notify.ts). Its domain must be
+  // onboarded to Email Sending for sends to go out.
   AUTH_EMAIL_FROM?: string;
   // Freshness thresholds ([vars], parsed in src/lib/freshness.ts): a venue
   // is stale when last verified more than STALE_MONTHS ago (or never

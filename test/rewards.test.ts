@@ -96,37 +96,28 @@ function failingInsertDb(): Db {
   }) as Db;
 }
 
-interface SentMail {
-  to: string;
-  subject: string;
-  html: string;
-}
-
-// Stub Resend's outbound POST; returns the recorded send bodies.
-function stubResend() {
-  const sends: SentMail[] = [];
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (_url: unknown, init?: RequestInit) => {
-      sends.push(JSON.parse(String(init?.body)) as SentMail);
-      return new Response("{}", { status: 200 });
+// Stub the EMAIL send_email binding; returns the recorded send payloads.
+function stubEmail() {
+  const sends: EmailMessageBuilder[] = [];
+  const prev = env.EMAIL;
+  env.EMAIL = {
+    send: vi.fn(async (m: EmailMessage | EmailMessageBuilder) => {
+      sends.push(m as EmailMessageBuilder);
+      return { messageId: "test-message-id" };
     }),
-  );
-  const prevKey = env.RESEND_API_KEY;
-  env.RESEND_API_KEY = "test-resend-key";
+  };
   return {
     sends,
     restore() {
-      env.RESEND_API_KEY = prevKey || "";
-      vi.unstubAllGlobals();
+      env.EMAIL = prev;
     },
   };
 }
 
 // --- (a)+(e) publish notification --------------------------------------------
 
-it("approve emails the submitter via Resend; reject and rolled-back publishes do not", async () => {
-  const stub = stubResend();
+it("approve emails the submitter via the EMAIL binding; reject and rolled-back publishes do not", async () => {
+  const stub = stubEmail();
   try {
     const submitter = await forgeSession("submitter");
     const reviewer = await forgeSession("reviewer");
@@ -171,9 +162,9 @@ it("approve emails the submitter via Resend; reject and rolled-back publishes do
   }
 });
 
-it("approve still succeeds with no RESEND_API_KEY configured (email skipped)", async () => {
-  const prevKey = env.RESEND_API_KEY;
-  env.RESEND_API_KEY = "";
+it("approve still succeeds with no EMAIL binding configured (email skipped)", async () => {
+  const prev = env.EMAIL;
+  env.EMAIL = undefined;
   try {
     const submitter = await forgeSession("submitter");
     const reviewer = await forgeSession("reviewer");
@@ -184,7 +175,7 @@ it("approve still succeeds with no RESEND_API_KEY configured (email skipped)", a
     });
     expect(res.status).toBe(200);
   } finally {
-    env.RESEND_API_KEY = prevKey || "";
+    env.EMAIL = prev;
   }
 });
 

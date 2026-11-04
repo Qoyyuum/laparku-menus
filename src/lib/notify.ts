@@ -3,32 +3,53 @@ import { getDb } from "../db/client";
 import type { Submission } from "../db/schema";
 import type { Env } from "../env";
 
-// Shared Resend sender — magic links (src/auth.ts) and contributor
-// notifications both go through here so from-address handling and the
-// missing-key behavior stay in one place. Throws on a non-2xx Resend
-// response; no-ops with a log line when RESEND_API_KEY is unset so dev/test
-// flows stay usable without a mailer.
+// Shared sender — magic links (src/auth.ts) and contributor notifications
+// both go through here so from-address handling and the missing-binding
+// behavior stay in one place. Sends via the Cloudflare Email Service
+// send_email binding (no API key; throws a coded Error on rejection).
+// No-ops with a log line when EMAIL is unbound so dev/test flows stay
+// usable without a mailer.
 export async function sendEmail(env: Env, to: string, subject: string, html: string): Promise<void> {
-  if (!env.RESEND_API_KEY) {
-    console.log(`[email] RESEND_API_KEY unset — skipping "${subject}" to ${to}`);
+  if (!env.EMAIL) {
+    console.log(`[email] EMAIL binding unset — skipping "${subject}" to ${to}`);
     return;
   }
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${env.RESEND_API_KEY}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      from: env.AUTH_EMAIL_FROM || "Laparku <no-reply@laparku.com>",
-      to,
-      subject,
-      html,
-    }),
+  await env.EMAIL.send({
+    to,
+    from: parseSender(env.AUTH_EMAIL_FROM || "Laparku <no-reply@laparku.com>"),
+    subject,
+    html,
+    text: htmlToText(html),
   });
-  if (!res.ok) {
-    throw new Error(`Resend send failed: ${res.status} ${await res.text()}`);
-  }
+}
+
+// AUTH_EMAIL_FROM accepts a bare address or "Name <addr@dom>"; the builder
+// wants the display name split out into { email, name }.
+function parseSender(from: string): string | EmailAddress {
+  const m = /^(.*)<([^<>]+)>$/.exec(from.trim());
+  if (!m) return from.trim();
+  const name = m[1]!.trim();
+  return name ? { name, email: m[2]!.trim() } : m[2]!.trim();
+}
+
+// Plain-text companion for the HTML bodies — Email Sending accepts both
+// parts, and text-only clients (plus spam scoring) do better with one.
+// Anchors keep their href inline so links (magic links especially) survive
+// the strip.
+function htmlToText(html: string): string {
+  return html
+    .replace(/<a\s[^>]*?href="([^"]*)"[^>]*>(.*?)<\/a>/gis, "$2 — $1")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|h[1-6]|li)>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function escapeHtml(s: string): string {
@@ -47,8 +68,8 @@ function escapeHtml(s: string): string {
 // venue_revisions audit row so the email can name + link it.
 //
 // Best-effort: a missing user row (grandfathered anonymous submission), an
-// unset RESEND_API_KEY, or a Resend outage never propagates — the menu is
-// already published and a mailer hiccup must not fail the approve.
+// unbound EMAIL binding, or an Email Service outage never propagates — the
+// menu is already published and a mailer hiccup must not fail the approve.
 export async function notifyPublished(env: Env, submission: Submission): Promise<void> {
   try {
     if (!submission.user_id) return;
@@ -79,8 +100,8 @@ export async function notifyPublished(env: Env, submission: Submission): Promise
 
 // "Something you scanned was unpublished" email, fired when a reviewer
 // removes a trusted-published item from the verify queue. Spec §6 calls
-// for the Resend path here (unlike a normal pending_review rejection,
-// which sends no email — the submitter never saw their item go live).
+// for an email here (unlike a normal pending_review rejection, which sends
+// no email — the submitter never saw their item go live).
 // Same best-effort contract as notifyPublished: the item is already
 // hidden, a mailer hiccup must not fail the unpublish.
 export async function notifyUnpublished(
@@ -117,8 +138,8 @@ export async function notifyUnpublished(
 // as the submitter lookups above); roles are comma-separated there, so
 // they're split and matched in JS — the same check requireAuth applies —
 // rather than a LIKE that could substring-match an unrelated role name.
-// Best-effort like the other notifications — a Resend outage never blocks
-// a publish.
+// Best-effort like the other notifications — an Email Service outage never
+// blocks a publish.
 export async function notifyTrustedPublish(env: Env, venueName: string, count: number): Promise<void> {
   try {
     const rows = (await getDb(env).all(sql`

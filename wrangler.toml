@@ -66,7 +66,17 @@ name = "RATE_LIMITER"
 namespace_id = "1001"
 simple = { limit = 10, period = 60 }
 
-# Secrets (TURNSTILE_SECRET_KEY, BETTER_AUTH_SECRET, RESEND_API_KEY, plus the
-# optional product-lookup provider keys EAN_SEARCH_TOKEN / UPCITEMDB_KEY /
+# Cloudflare Email Service — transactional email (sign-in magic links +
+# submission notifications) via env.EMAIL; no API key needed. The
+# from-domain (AUTH_EMAIL_FROM var, or the default no-reply@laparku.com in
+# src/lib/notify.ts) must be onboarded to Email Sending — `wrangler email
+# sending enable <domain>` or Dashboard → Email Service. `wrangler dev`
+# simulates the binding: messages are written to a file whose path is
+# logged, not delivered.
+[[send_email]]
+name = "EMAIL"
+
+# Secrets (TURNSTILE_SECRET_KEY, BETTER_AUTH_SECRET, plus the optional
+# product-lookup provider keys EAN_SEARCH_TOKEN / UPCITEMDB_KEY /
 # BARCODELookup_KEY — unset keys just skip that provider) are set via
 # `wrangler secret put` — never in this file.

@@ -47,10 +47,14 @@ Two gotchas that bite on first run:
   EXTRACTOR=stub
   ```
 
-To test sign-in locally without Resend: request a link in the app (log-in
-icon → `/signin` → email → "Email me a sign-in link"), then copy the
-`magic link for <email>: <url>` line printed in the dev console and open it —
-it 302s to the callback route and sets the session cookie.
+To test sign-in locally: email goes through the `send_email` binding, which
+`wrangler dev` simulates — nothing is actually delivered. Request a link in
+the app (log-in icon → `/signin` → email → "Email me a sign-in link"), find
+the `send_email binding called with MessageBuilder:` block in the dev
+console, open the `Text:`/`HTML:` file path it logs, and copy the sign-in
+URL out of the email body — it 302s to the callback route and sets the
+session cookie. (With no `EMAIL` binding at all, the link is logged
+directly as `magic link for <email>: <url>`.)
 
 ## Deploy
 
@@ -77,10 +81,15 @@ npx wrangler pages deploy landing --project-name=laparku   # → https://laparku
 Set via `wrangler secret put <NAME>` — never commit them:
 
 - `BETTER_AUTH_SECRET` — any long random string (`crypto.randomUUID()` x2 works)
-- `RESEND_API_KEY` — magic-link + notification email via Resend
 - `TURNSTILE_SECRET_KEY` — Cloudflare Turnstile; pair with `TURNSTILE_SITE_KEY` in
   `wrangler.toml` `[vars]` and `EXPO_PUBLIC_TURNSTILE_SITEKEY` for the app build.
   When unset, server-side Turnstile checks are skipped (fine for dev).
+
+Email needs no secret — magic links + notifications send through the
+`send_email` binding (`env.EMAIL`). Before the first real send, onboard the
+from-domain to Email Sending (`npx wrangler email sending enable
+<domain>`); optionally set the `AUTH_EMAIL_FROM` var to pick the sender
+(default `Laparku <no-reply@laparku.com>`).
 
 ## Contributing
 

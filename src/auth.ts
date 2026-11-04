@@ -23,9 +23,10 @@ export function createAuth(env: Env) {
       admin({ defaultRole: "submitter" }),
       magicLink({
         sendMagicLink: async ({ email, url }) => {
-          if (!env.RESEND_API_KEY) {
-            // Dev/test: no mailer configured — log the link so sign-in flows
-            // remain usable locally.
+          if (!env.EMAIL) {
+            // No mailer bound — log the link so sign-in flows remain usable.
+            // (In `wrangler dev` the binding IS present but simulated:
+            // miniflare writes the message to a file and logs its path.)
             console.log(`[auth] magic link for ${email}: ${url}`);
             return;
           }
