@@ -145,6 +145,44 @@ export interface QueueSubmission {
   submitter_trust_tier: "anonymous" | "new" | "trusted" | null;
 }
 
+// A trusted-published item awaiting the reviewer double-check (mirrors
+// GET /api/admin/pending-verification — the item row plus venue, source
+// submission, lookup provenance, and the submitter's overrides vs the
+// lookup payload).
+export interface PendingVerificationItem extends FoodItem {
+  package_size: string | null;
+  barcode_source: string[] | null;
+  off_barcode: string | null;
+  source_submission_id: string | null;
+  status: string;
+  is_current: boolean;
+  created_at: number;
+  venue_name: string;
+  submission:
+    | (QueueSubmission & {
+        publish_mode: "reviewed" | "trusted" | null;
+        scan_barcode: string | null;
+        user_id: string | null;
+      })
+    | null;
+  lookup: {
+    code: string;
+    merged_payload: {
+      name?: string;
+      brand?: string;
+      package_size?: string;
+      nutrition_estimate?: NutritionEstimate;
+      image_url?: string;
+    };
+    sources: { provider: string; url?: string }[];
+    found: boolean;
+    fetched_at: number;
+  }[];
+  // Fields the submitter changed relative to the lookup payload —
+  // { field: { lookup, submitted } }.
+  overrides: Record<string, { lookup: unknown; submitted: unknown }>;
+}
+
 // Post-publish item report (mirrors GET /api/admin/flags — the flag row
 // joined with its item + venue names).
 export interface ItemFlag {

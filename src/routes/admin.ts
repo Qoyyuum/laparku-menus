@@ -1,10 +1,21 @@
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { getDb } from "../db/client";
-import { food_items, item_flags, SUBMISSION_STATUSES, submissions, submitters, user_badges, venues } from "../db/schema";
+import {
+  food_items,
+  item_flags,
+  product_lookup_cache,
+  SUBMISSION_STATUSES,
+  submissions,
+  submitters,
+  user_badges,
+  venues,
+} from "../db/schema";
 import type { Env } from "../env";
 import { BADGES } from "../lib/badges";
 import { listStaleVenues } from "../lib/freshness";
+import { notifyUnpublished } from "../lib/notify";
+import { normalizeBarcode } from "../lib/product-lookup";
 import { PublishError, publishSubmission, rejectSubmission, type PublishEdits } from "../lib/publish";
 import { requireAuth, type AuthVariables } from "../middleware/auth";
 
@@ -107,6 +118,189 @@ adminApi.post("/flags/:id/resolve", async (c) => {
       .limit(1);
     if (!flag) return c.json({ error: "flag not found" }, 404);
     return c.json({ error: `flag is already ${flag.status}` }, 409);
+  }
+  return c.json({ ok: true });
+});
+
+// Cache codes a stored barcode could be filed under — the canonical code
+// plus its UPC-E expansion candidate (the same keys the lookup chain and
+// the trusted-publish gate resolve through). Non-digit codes (Code 128 /
+// QR payloads) pass through as-is.
+function lookupKeys(barcode: string | null): string[] {
+  if (!barcode) return [];
+  return normalizeBarcode(barcode)?.candidates ?? [barcode];
+}
+
+// GET /api/admin/pending-verification — the reviewer double-check queue
+// (spec §6): trusted-published items still carrying the badge, newest
+// first. Each row carries the venue, the source submission (with the
+// submitter's trust tier), the lookup-chain payload that prefilled the
+// item (product_lookup_cache.merged_payload + per-provider sources), and
+// the fields the submitter changed relative to that payload (overrides) —
+// the lookup-vs-submitted delta is exactly what the reviewer is checking.
+adminApi.get("/pending-verification", async (c) => {
+  const db = getDb(c.env);
+  const rows = await db
+    .select({
+      item: food_items,
+      venue_name: venues.name,
+      submission: submissions,
+      submitter_trust_tier: submitters.trust_tier,
+    })
+    .from(food_items)
+    .innerJoin(venues, eq(food_items.venue_id, venues.id))
+    .leftJoin(submissions, eq(food_items.source_submission_id, submissions.id))
+    .leftJoin(submitters, eq(submissions.submitter_id, submitters.id))
+    .where(and(eq(food_items.pending_verification, true), eq(food_items.is_current, true)))
+    .orderBy(desc(food_items.created_at))
+    .limit(LIMIT);
+
+  // Provenance join can't go through SQL — cache codes are the barcode's
+  // normalized candidates, computed in JS — so the cache rows are fetched
+  // in one chunked IN query and mapped back per item.
+  const keys = [...new Set(rows.flatMap((r) => lookupKeys(r.item.barcode)))];
+  const cache = new Map<string, typeof product_lookup_cache.$inferSelect>();
+  for (let off = 0; off < keys.length; off += 90) {
+    const hits = await db
+      .select()
+      .from(product_lookup_cache)
+      .where(inArray(product_lookup_cache.code, keys.slice(off, off + 90)));
+    for (const h of hits) cache.set(h.code, h);
+  }
+
+  return c.json({
+    items: rows.map((r) => {
+      const lookup = lookupKeys(r.item.barcode)
+        .map((k) => cache.get(k))
+        .filter((h): h is NonNullable<typeof h> => h !== undefined)
+        .map((h) => ({
+          code: h.code,
+          merged_payload: h.merged_payload,
+          sources: h.sources,
+          found: h.found,
+          fetched_at: h.fetched_at,
+        }));
+      // The first cache row's merged payload is the answer the lookup
+      // chain produced; any live field differing from it is a submitter
+      // override the reviewer should see highlighted.
+      const merged = lookup[0]?.merged_payload;
+      const overrides: Record<string, { lookup: unknown; submitted: unknown }> = {};
+      if (merged) {
+        for (const field of ["name", "brand", "package_size"] as const) {
+          const submitted = r.item[field];
+          if (submitted != null && submitted !== merged[field]) {
+            overrides[field] = { lookup: merged[field] ?? null, submitted };
+          }
+        }
+      }
+      return {
+        ...r.item,
+        venue_name: r.venue_name,
+        submission: r.submission
+          ? { ...r.submission, submitter_trust_tier: r.submitter_trust_tier }
+          : null,
+        lookup,
+        overrides,
+      };
+    }),
+  });
+});
+
+// POST /api/admin/items/:id/verify — the reviewer checked the item against
+// its lookup payload: clear the badge. Optional body { verify_nutrition:
+// true } also flips nutrition_estimate.status to "verified" — the estimate
+// only graduates when a human asked for it. Idempotent: an item whose badge
+// is already cleared returns 200, so a double-tap or a second reviewer is
+// never an error.
+adminApi.post("/items/:id/verify", async (c) => {
+  let body: { verify_nutrition?: unknown } = {};
+  try {
+    body = (await c.req.json()) as typeof body;
+  } catch {
+    // Bodyless POSTs are fine — everything about verify has a default.
+  }
+  const db = getDb(c.env);
+  const id = c.req.param("id");
+  const [item] = await db.select().from(food_items).where(eq(food_items.id, id)).limit(1);
+  if (!item) return c.json({ error: "item not found" }, 404);
+  if (!item.pending_verification) return c.json({ ok: true, already_verified: true });
+
+  const patch: { pending_verification: boolean; nutrition_estimate?: typeof item.nutrition_estimate } = {
+    pending_verification: false,
+  };
+  if (body.verify_nutrition === true && item.nutrition_estimate) {
+    patch.nutrition_estimate = { ...item.nutrition_estimate, status: "verified" };
+  }
+  // Conditional claim — a second reviewer racing the same item no-ops.
+  await db
+    .update(food_items)
+    .set(patch)
+    .where(and(eq(food_items.id, id), eq(food_items.pending_verification, true)));
+  return c.json({ ok: true });
+});
+
+// POST /api/admin/items/:id/unpublish — the item didn't hold up: hide it
+// (is_current=false, status="hidden" — superseded stays for explicit
+// merges only, "hidden" is the removal state) and reject its source
+// submission, which dents the submitter's reputation exactly like a normal
+// rejection and emails them through the existing notify path. Optional
+// body { reason } becomes the submission's rejection_reason.
+//
+// Both updates are conditional claims: a second unpublish 409s, and the
+// submitter is only penalized when this call actually flipped the
+// submission — unpublishing a second item of an already-rejected batch
+// hides the item without double-counting the rejection.
+adminApi.post("/items/:id/unpublish", async (c) => {
+  let body: { reason?: unknown } = {};
+  try {
+    body = (await c.req.json()) as typeof body;
+  } catch {
+    // reason is optional — a bodyless unpublish is valid.
+  }
+  const db = getDb(c.env);
+  const id = c.req.param("id");
+  const claimed = await db
+    .update(food_items)
+    .set({ is_current: false, status: "hidden", pending_verification: false })
+    .where(and(eq(food_items.id, id), eq(food_items.is_current, true), eq(food_items.status, "published")))
+    .returning();
+  const item = claimed[0];
+  if (!item) {
+    const [existing] = await db
+      .select({ status: food_items.status })
+      .from(food_items)
+      .where(eq(food_items.id, id))
+      .limit(1);
+    if (!existing) return c.json({ error: "item not found" }, 404);
+    return c.json({ error: `item is already ${existing.status}` }, 409);
+  }
+
+  if (item.source_submission_id) {
+    const reviewer = c.get("user");
+    const reason =
+      typeof body?.reason === "string" && body.reason.trim() !== ""
+        ? body.reason.trim()
+        : "unpublished by reviewer";
+    const [sub] = await db
+      .update(submissions)
+      .set({ status: "rejected", rejection_reason: reason, reviewer_id: reviewer.id })
+      .where(and(eq(submissions.id, item.source_submission_id), eq(submissions.status, "trusted_published")))
+      .returning();
+    if (sub) {
+      if (sub.submitter_id) {
+        await db
+          .update(submitters)
+          .set({ rejected_count: sql`${submitters.rejected_count} + 1` })
+          .where(eq(submitters.id, sub.submitter_id));
+      }
+      const [venue] = await db
+        .select({ name: venues.name })
+        .from(venues)
+        .where(eq(venues.id, item.venue_id))
+        .limit(1);
+      // Awaited like the publish email — never races a post-response freeze.
+      await notifyUnpublished(c.env, sub, item.name, venue?.name ?? null);
+    }
   }
   return c.json({ ok: true });
 });

@@ -8,8 +8,10 @@ import {
   venues,
   type Submitter,
 } from "../db/schema";
+import type { Env } from "../env";
 import { resolveSubmitter } from "../routes/submissions";
 import { recordVerification } from "./freshness";
+import { notifyTrustedPublish } from "./notify";
 import { normalizeBarcode } from "./product-lookup";
 import { PublishError } from "./publish";
 import { recordRevision } from "./revisions";
@@ -93,6 +95,7 @@ async function bumpSubmitterCounts(db: Db, submitter: Submitter, filed: number, 
 export async function trustedPublishScan(
   db: Db,
   input: { userId: string; venueId: string; provenance: string; items: ScanItem[] },
+  env: Env,
 ): Promise<ScanPublishResult> {
   const { userId, venueId, provenance } = input;
   // Normalize barcodes once at intake (canonical form — see
@@ -313,6 +316,19 @@ export async function trustedPublishScan(
     if (submissionRows > 0) {
       await bumpSubmitterCounts(db, submitter, submissionRows, trustedId ? 1 : 0);
     }
+  }
+
+  // Spec §6: trusted items went live without a reviewer — email the
+  // reviewer/admin pool so the pending-verification queue gets eyes.
+  // Best-effort (failures are swallowed inside); awaited like the approval
+  // email in publish.ts so the send doesn't race a post-response freeze.
+  if (published > 0) {
+    const [venue] = await db
+      .select({ name: venues.name })
+      .from(venues)
+      .where(eq(venues.id, venueId))
+      .limit(1);
+    await notifyTrustedPublish(env, venue?.name ?? "a venue", published);
   }
 
   return {

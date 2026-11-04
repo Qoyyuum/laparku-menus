@@ -72,7 +72,7 @@ scanApi.post("/submissions/scan", rateLimit, requireAuth(SCAN_ROLES), async (c) 
       venueId: venue.id,
       provenance,
       items: items as ScanItem[],
-    });
+    }, c.env);
     return c.json(result, 201);
   } catch (e) {
     if (e instanceof PublishError) {

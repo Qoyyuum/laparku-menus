@@ -76,3 +76,69 @@ export async function notifyPublished(env: Env, submission: Submission): Promise
     console.log(`[notify] publish email for submission ${submission.id} failed: ${e}`);
   }
 }
+
+// "Something you scanned was unpublished" email, fired when a reviewer
+// removes a trusted-published item from the verify queue (spec §6 — the
+// submitter hears the same way a rejected submission would). Same
+// best-effort contract as notifyPublished: the item is already hidden, a
+// mailer hiccup must not fail the unpublish.
+export async function notifyUnpublished(
+  env: Env,
+  submission: Submission,
+  itemName: string,
+  venueName: string | null,
+): Promise<void> {
+  try {
+    if (!submission.user_id) return;
+    const [row] = (await getDb(env).all(sql`
+      SELECT u.email AS email FROM "user" AS u WHERE u.id = ${submission.user_id} LIMIT 1
+    `)) as { email: string }[];
+    if (!row?.email) return;
+
+    const venueBit = venueName ? ` at <strong>${escapeHtml(venueName)}</strong>` : "";
+    await sendEmail(
+      env,
+      row.email,
+      "An item you scanned was unpublished on Laparku",
+      `<p>A reviewer removed <strong>${escapeHtml(itemName)}</strong>${venueBit} — ` +
+        `it didn't hold up to the double-check.</p>` +
+        `<p>If this looks wrong, resubmit with a clearer photo of the product.</p>`,
+    );
+  } catch (e) {
+    console.log(`[notify] unpublish email for submission ${submission.id} failed: ${e}`);
+  }
+}
+
+// "Trusted items went live" heads-up to every reviewer/admin (spec §6).
+// Trusted publishes skip the review queue, so without this email the
+// pending-verification tab could sit unseen. Recipients come off the
+// better-auth `user` table (untracked by drizzle → raw SQL, same convention
+// as the submitter lookups above); roles are comma-separated there, so a
+// substring match covers e.g. "submitter,reviewer". Best-effort like the
+// other notifications — a Resend outage never blocks a publish.
+export async function notifyTrustedPublish(env: Env, venueName: string, count: number): Promise<void> {
+  try {
+    const rows = (await getDb(env).all(sql`
+      SELECT email FROM "user"
+      WHERE (role LIKE '%reviewer%' OR role LIKE '%admin%')
+        AND (banned IS NULL OR banned = 0)
+    `)) as { email: string }[];
+    const subject = `${count} product${count === 1 ? "" : "s"} trusted-published at ${venueName} — pending verification`;
+    const html =
+      `<p>${count} scanned product${count === 1 ? "" : "s"} just went live ` +
+      `at <strong>${escapeHtml(venueName)}</strong> through the trusted-publish path.</p>` +
+      `<p>They carry the pending-verification badge until a reviewer confirms them.</p>` +
+      `<p><a href="${escapeHtml(`${env.PUBLIC_BASE_URL}/admin`)}">Open the verify queue</a></p>`;
+    for (const r of rows) {
+      if (!r.email) continue;
+      try {
+        await sendEmail(env, r.email, subject, html);
+      } catch (e) {
+        // One bad recipient/send must not starve the rest of the list.
+        console.log(`[notify] reviewer notice to ${r.email} failed: ${e}`);
+      }
+    }
+  } catch (e) {
+    console.log(`[notify] reviewer notice for ${venueName} failed: ${e}`);
+  }
+}
