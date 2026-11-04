@@ -42,7 +42,7 @@ function HeaderLinks() {
       <HeaderIconLink href="/coverage" icon="map" label="Coverage" />
       <HeaderIconLink href="/leaderboard" icon="trophy" label="Leaderboards" />
       <HeaderIconLink
-        href="/profile"
+        href={session ? "/profile" : "/signin"}
         icon={session ? "person-circle" : "log-in"}
         label={session ? "Profile" : "Sign in"}
       />

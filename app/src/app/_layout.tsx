@@ -22,6 +22,7 @@ export default function RootLayout() {
         <Stack.Screen name="profile" options={{ title: "Your profile" }} />
         <Stack.Screen name="coverage" options={{ title: "Coverage" }} />
         <Stack.Screen name="submit" options={{ title: "Submit a menu" }} />
+        <Stack.Screen name="signin" options={{ title: "Sign in" }} />
         <Stack.Screen name="admin/index" options={{ title: "Review queue" }} />
         <Stack.Screen name="admin/review/[id]" options={{ title: "Review submission" }} />
       </Stack>
