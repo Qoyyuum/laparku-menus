@@ -67,3 +67,51 @@ it("fetchVerifiedAccounts normalizes verified_accounts, hides hidden, [] on 404"
     globalThis.fetch = realFetch;
   }
 });
+
+// --- /api/me prefs -----------------------------------------------------------
+
+interface MeResponse {
+  display_name: string | null;
+  show_on_leaderboard: boolean;
+  show_credit: boolean;
+  theme: string;
+  preferred_social: string | null;
+  socials: { platform: string; label: string; handle: string; url: string }[];
+  avatar_url: string;
+}
+
+async function getMe(cookie: string): Promise<MeResponse> {
+  const res = await SELF.fetch("https://x/api/me", { headers: { cookie } });
+  expect(res.status).toBe(200);
+  return res.json();
+}
+
+async function patchMe(cookie: string, body: unknown): Promise<Response> {
+  return SELF.fetch("https://x/api/me", {
+    method: "PATCH",
+    headers: { "content-type": "application/json", cookie },
+    body: JSON.stringify(body),
+  });
+}
+
+it("PATCH theme validated; display_name no longer writes", async () => {
+  const u = await forgeSession("submitter");
+  expect((await patchMe(u.cookie, { theme: "neon" })).status).toBe(400);
+  expect((await patchMe(u.cookie, { theme: "dark" })).status).toBe(200);
+  // old-field regression: a patch naming only display_name 400s, no write
+  expect((await patchMe(u.cookie, { display_name: "VulgarName" })).status).toBe(400);
+  const me = await getMe(u.cookie);
+  expect(me.theme).toBe("dark");
+  expect(me.display_name).toBeNull();
+});
+
+it("GET /api/me exposes theme, preferred_social, socials and a gravatar avatar_url", async () => {
+  const u = await forgeSession("submitter");
+  const me = await getMe(u.cookie);
+  expect(me.theme).toBe("system");
+  expect(me.preferred_social).toBeNull();
+  expect(me.socials).toEqual([]);
+  expect(me.avatar_url).toBe(
+    `https://www.gravatar.com/avatar/${await sha256Hex(`${u.userId}@test.dev`)}?s=200&d=identicon`,
+  );
+});

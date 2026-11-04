@@ -232,29 +232,41 @@ it("kind=verifications ranks votes", async () => {
 
 // --- (f) PATCH /api/me updates the opt-in flags --------------------------------
 
-it("PATCH /api/me sets display_name and flags, which the board then renders", async () => {
+it("PATCH /api/me sets prefs and flags; the board honours the opt-in gate", async () => {
   const venue = await seedVenue();
   const u = await forgeSession("submitter");
   await seedCheckins(u.userId, [venue.id]);
 
   // Anonymous → 401.
-  expect((await patchMe({ display_name: "X" })).status).toBe(401);
-  // Bad field types → 400; a patch with no recognized fields → 400.
-  expect((await patchMe({ display_name: 42 }, u.cookie)).status).toBe(400);
+  expect((await patchMe({ show_on_leaderboard: true })).status).toBe(401);
+  // Bad field types → 400; a patch with no recognized fields → 400
+  // (display_name is no longer a recognized field — freeform names are gone).
+  expect((await patchMe({ theme: "neon" }, u.cookie)).status).toBe(400);
   expect((await patchMe({ show_on_leaderboard: "yes" }, u.cookie)).status).toBe(400);
   expect((await patchMe({}, u.cookie)).status).toBe(400);
+  expect((await patchMe({ display_name: "X" }, u.cookie)).status).toBe(400);
 
-  const res = await patchMe({ display_name: "Ali B", show_on_leaderboard: true, show_credit: true }, u.cookie);
+  const res = await patchMe(
+    { theme: "dark", preferred_social: null, show_on_leaderboard: true, show_credit: true },
+    u.cookie,
+  );
   expect(res.status).toBe(200);
   const patched = (await res.json()) as {
-    display_name: string | null;
+    theme: string;
+    preferred_social: string | null;
     show_on_leaderboard: boolean;
     show_credit: boolean;
   };
-  expect(patched).toEqual({ display_name: "Ali B", show_on_leaderboard: true, show_credit: true });
+  expect(patched).toMatchObject({
+    theme: "dark",
+    preferred_social: null,
+    show_on_leaderboard: true,
+    show_credit: true,
+  });
 
-  // Other tests' rows share this file's D1 — find the row by its (unique)
-  // display_name rather than position.
+  // Board rows key off the name field — seed it directly (public-name
+  // source changes in a later task; the opt-in gate is what this test pins).
+  await setPrefs(u.userId, { display_name: "Ali B" });
   let b = await board("?kind=checkins&period=all");
   expect(b.body.board.some((r) => r.name === "Ali B" && r.count === 1)).toBe(true);
 
