@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@better-auth/api-key": "1.7.15",
+    "@better-auth/passkey": "1.7.15",
     "@cf-wasm/photon": "^0.4.0",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "better-auth": "^1.7.15",
