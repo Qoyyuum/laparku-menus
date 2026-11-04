@@ -267,3 +267,11 @@ it("avatar upload rejects non-images, oversize, and unauthenticated callers", as
   expect((await postAvatar("", PNG_BYTES)).status).toBe(401);
   expect((await SELF.fetch("https://x/api/avatar/no-such-user")).status).toBe(404);
 });
+
+// --- passkeys ----------------------------------------------------------------
+
+it("passkey plugin is mounted: its endpoints 401 unauthenticated, not 404", async () => {
+  const res = await SELF.fetch("https://x/api/auth/passkey/list-user-passkeys");
+  // A missing plugin would fall through to 404; mounted but unauthed → 401.
+  expect(res.status).toBe(401);
+});
