@@ -37,7 +37,7 @@ export default function VenuesScreen() {
   }, [q, filters]);
 
   return (
-    <ScrollView className="flex-1 bg-neutral-50" contentContainerClassName="gap-4 p-4">
+    <ScrollView className="flex-1 bg-neutral-50 dark:bg-neutral-900" contentContainerClassName="gap-4 p-4">
       <SearchBar value={q} onChange={setQ} placeholder="Search venues…" />
       <FilterBar
         filters={filters}
@@ -47,7 +47,7 @@ export default function VenuesScreen() {
       {loading ? <ActivityIndicator color="#047857" /> : null}
       {error ? <Text className="text-sm text-red-600">{error}</Text> : null}
       {!loading && !error && venues.length === 0 ? (
-        <Text className="py-8 text-center text-neutral-500">No venues match.</Text>
+        <Text className="py-8 text-center text-neutral-500 dark:text-neutral-400">No venues match.</Text>
       ) : null}
       <View className="gap-2">
         {venues.map((venue) => (

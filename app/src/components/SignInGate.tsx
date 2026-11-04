@@ -25,7 +25,7 @@ export function SignInGate({
 
   if (isPending) {
     return (
-      <View className="flex-1 items-center justify-center bg-neutral-50 p-4">
+      <View className="flex-1 items-center justify-center bg-neutral-50 dark:bg-neutral-900 p-4">
         <ActivityIndicator color="#047857" />
       </View>
     );
@@ -33,8 +33,8 @@ export function SignInGate({
 
   if (!session) {
     return (
-      <View className="flex-1 justify-center bg-neutral-50 p-4">
-        <View className="mx-auto w-full max-w-sm gap-3 rounded-xl border border-neutral-200 bg-white p-4">
+      <View className="flex-1 justify-center bg-neutral-50 dark:bg-neutral-900 p-4">
+        <View className="mx-auto w-full max-w-sm gap-3 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 p-4">
           <MagicLinkForm title={title} subtitle={subtitle} callbackURL={callbackURL} />
         </View>
       </View>
@@ -43,15 +43,15 @@ export function SignInGate({
 
   if (requireReviewer && !isReviewer(session.user as { role?: string | null })) {
     return (
-      <View className="flex-1 items-center justify-center gap-3 bg-neutral-50 p-4">
-        <Text className="text-center text-base text-neutral-700">
+      <View className="flex-1 items-center justify-center gap-3 bg-neutral-50 dark:bg-neutral-900 p-4">
+        <Text className="text-center text-base text-neutral-700 dark:text-neutral-300">
           Signed in as {session.user.email} — this account does not have reviewer access.
         </Text>
         <Pressable
-          className="rounded-lg border border-neutral-300 px-4 py-2"
+          className="rounded-lg border border-neutral-300 dark:border-neutral-600 px-4 py-2"
           onPress={() => authClient.signOut()}
         >
-          <Text className="text-base font-medium text-neutral-800">Sign out</Text>
+          <Text className="text-base font-medium text-neutral-800 dark:text-neutral-100">Sign out</Text>
         </Pressable>
       </View>
     );

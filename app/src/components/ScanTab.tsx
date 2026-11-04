@@ -277,7 +277,7 @@ export function ScanTab({
           </Pressable>
           {leftover > 0 && onAddPhotos ? (
             <Pressable
-              className="rounded-lg border border-emerald-700 bg-white px-4 py-2"
+              className="rounded-lg border border-emerald-700 bg-white dark:bg-neutral-800 px-4 py-2"
               onPress={() =>
                 onAddPhotos(
                   unknown.map((c) => c.code),
@@ -299,7 +299,7 @@ export function ScanTab({
   if (!venue) {
     return (
       <View className="gap-2">
-        <Text className="text-sm leading-6 text-neutral-600">
+        <Text className="text-sm leading-6 text-neutral-600 dark:text-neutral-300">
           Scan packaged-product barcodes at a venue — every code in the batch attaches to the place
           you pick first.
         </Text>
@@ -321,14 +321,14 @@ export function ScanTab({
     <View className="gap-3">
       <View className="flex-row items-center justify-between">
         <View className="flex-1">
-          <Text className="text-sm font-semibold text-neutral-800">Scanning at {venue.name}</Text>
-          <Text className="text-xs text-neutral-500">Every code scanned attaches to this venue.</Text>
+          <Text className="text-sm font-semibold text-neutral-800 dark:text-neutral-100">Scanning at {venue.name}</Text>
+          <Text className="text-xs text-neutral-500 dark:text-neutral-400">Every code scanned attaches to this venue.</Text>
         </View>
         <Pressable
-          className="rounded-lg border border-neutral-300 bg-white px-3 py-1.5"
+          className="rounded-lg border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 px-3 py-1.5"
           onPress={() => setVenue(null)}
         >
-          <Text className="text-sm font-medium text-neutral-700">Change</Text>
+          <Text className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Change</Text>
         </Pressable>
       </View>
 
@@ -354,7 +354,7 @@ export function ScanTab({
       {/* "Type it instead" — damaged codes, permission-denied, desktop. */}
       <View className="flex-row gap-2">
         <TextInput
-          className="flex-1 rounded-lg border border-neutral-300 bg-white px-3 py-2 text-base"
+          className="flex-1 rounded-lg border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 px-3 py-2 text-base"
           placeholder="Type it instead — barcode digits"
           value={manualCode}
           onChangeText={setManualCode}
@@ -366,18 +366,18 @@ export function ScanTab({
           }}
         />
         <Pressable
-          className="items-center justify-center rounded-lg border border-neutral-300 bg-white px-4 disabled:opacity-50"
+          className="items-center justify-center rounded-lg border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 px-4 disabled:opacity-50"
           disabled={manualCode.trim() === ""}
           onPress={() => {
             handleCode(manualCode);
             setManualCode("");
           }}
         >
-          <Text className="text-sm font-medium text-neutral-800">Add</Text>
+          <Text className="text-sm font-medium text-neutral-800 dark:text-neutral-100">Add</Text>
         </Pressable>
       </View>
 
-      <Text className="text-sm font-semibold text-neutral-800">
+      <Text className="text-sm font-semibold text-neutral-800 dark:text-neutral-100">
         {captures.length} captured — {found.length} identified, {unknown.length} unknown
         {resolving.length > 0 ? `, ${resolving.length} looking up…` : ""}
       </Text>
@@ -409,11 +409,11 @@ export function ScanTab({
         onRequestClose={() => setSheetOpen(false)}
       >
         <View className="flex-1 justify-end bg-black/50">
-          <View className="max-h-[85%] gap-3 rounded-t-2xl bg-white p-4">
-            <Text className="text-base font-bold text-neutral-900">
+          <View className="max-h-[85%] gap-3 rounded-t-2xl bg-white dark:bg-neutral-800 p-4">
+            <Text className="text-base font-bold text-neutral-900 dark:text-neutral-100">
               Submit {found.length} scanned product{found.length === 1 ? "" : "s"}
             </Text>
-            <Text className="text-sm leading-6 text-neutral-600">
+            <Text className="text-sm leading-6 text-neutral-600 dark:text-neutral-300">
               {found.length} identified — publish{found.length === 1 ? "es" : ""} immediately at{" "}
               {venue.name} with a pending-verification badge.
               {unknown.length > 0
@@ -435,14 +435,14 @@ export function ScanTab({
                 {unknown.map((c) => (
                   <View
                     key={c.code}
-                    className="gap-1.5 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2"
+                    className="gap-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-900 px-3 py-2"
                   >
                     <View className="flex-row items-center justify-between">
                       <View className="flex-1">
-                        <Text className="text-sm font-medium text-neutral-900">
+                        <Text className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
                           unknown product
                         </Text>
-                        <Text className="text-xs text-neutral-500">
+                        <Text className="text-xs text-neutral-500 dark:text-neutral-400">
                           {c.code}
                           {c.status === "failed" ? " — lookup failed, needs photos" : ""}
                         </Text>
@@ -458,10 +458,10 @@ export function ScanTab({
                         </Pressable>
                       ) : null}
                       <Pressable
-                        className="rounded-md border border-neutral-300 bg-white px-2.5 py-1"
+                        className="rounded-md border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 px-2.5 py-1"
                         onPress={() => removeCode(c.code)}
                       >
-                        <Text className="text-xs font-semibold text-neutral-700">Drop</Text>
+                        <Text className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">Drop</Text>
                       </Pressable>
                     </View>
                   </View>
@@ -470,7 +470,7 @@ export function ScanTab({
             </ScrollView>
 
             <TextInput
-              className="rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm"
+              className="rounded-lg border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 px-3 py-2 text-sm"
               value={provenance}
               onChangeText={setProvenance}
               multiline
@@ -478,7 +478,7 @@ export function ScanTab({
 
             {error ? <Text className="text-sm text-red-600">{error}</Text> : null}
             {found.length === 0 ? (
-              <Text className="text-sm leading-6 text-neutral-600">
+              <Text className="text-sm leading-6 text-neutral-600 dark:text-neutral-300">
                 Nothing to publish yet — only identified products go into a scan batch. Unknown
                 codes need photos so a reviewer can see the product.
               </Text>
@@ -486,10 +486,10 @@ export function ScanTab({
 
             <View className="flex-row gap-2">
               <Pressable
-                className="flex-1 items-center rounded-lg border border-neutral-300 bg-white px-4 py-2.5"
+                className="flex-1 items-center rounded-lg border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 px-4 py-2.5"
                 onPress={() => setSheetOpen(false)}
               >
-                <Text className="text-sm font-semibold text-neutral-700">Keep scanning</Text>
+                <Text className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">Keep scanning</Text>
               </Pressable>
               <Pressable
                 className="flex-1 items-center rounded-lg bg-emerald-700 px-4 py-2.5 disabled:opacity-50"
@@ -527,27 +527,27 @@ function CaptureRow({ capture, onRemove }: { capture: Capture; onRemove: () => v
         ? "couldn't reach the product database — re-scan to retry"
         : "";
   return (
-    <View className="flex-row items-center gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2">
+    <View className="flex-row items-center gap-2 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2">
       <View className="flex-1">
         <Text
           className={`text-sm font-medium ${
-            c.status === "found" ? "text-neutral-900" : "text-neutral-500"
+            c.status === "found" ? "text-neutral-900 dark:text-neutral-100" : "text-neutral-500 dark:text-neutral-400"
           }`}
           numberOfLines={1}
         >
           {label}
         </Text>
-        <Text className="text-xs text-neutral-500" numberOfLines={1}>
+        <Text className="text-xs text-neutral-500 dark:text-neutral-400" numberOfLines={1}>
           {c.code}
           {detail ? ` — ${detail}` : ""}
         </Text>
       </View>
       <Pressable
-        className="h-6 w-6 items-center justify-center rounded-full bg-neutral-100"
+        className="h-6 w-6 items-center justify-center rounded-full bg-neutral-100 dark:bg-neutral-800"
         accessibilityLabel={`Remove ${c.code}`}
         onPress={onRemove}
       >
-        <Text className="text-sm font-bold text-neutral-600">×</Text>
+        <Text className="text-sm font-bold text-neutral-600 dark:text-neutral-300">×</Text>
       </Pressable>
     </View>
   );
@@ -639,10 +639,10 @@ function VenuePick({
 
   return (
     <View className="gap-3">
-      <Text className="text-sm font-semibold text-neutral-800">Where are you scanning?</Text>
+      <Text className="text-sm font-semibold text-neutral-800 dark:text-neutral-100">Where are you scanning?</Text>
 
       <Pressable
-        className="items-center rounded-lg border border-emerald-700 bg-white px-3 py-2"
+        className="items-center rounded-lg border border-emerald-700 bg-white dark:bg-neutral-800 px-3 py-2"
         disabled={locating}
         onPress={() => void useMyLocation()}
       >
@@ -650,11 +650,11 @@ function VenuePick({
           {locating ? "Locating…" : "Use my location"}
         </Text>
       </Pressable>
-      {locMsg ? <Text className="text-xs text-neutral-500">{locMsg}</Text> : null}
+      {locMsg ? <Text className="text-xs text-neutral-500 dark:text-neutral-400">{locMsg}</Text> : null}
 
       {nearby && nearby.length > 0 ? (
         <View className="gap-1.5">
-          <Text className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+          <Text className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
             Near you
           </Text>
           {nearby.map((v) => (
@@ -663,8 +663,8 @@ function VenuePick({
               className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2"
               onPress={() => onPick(v)}
             >
-              <Text className="text-sm font-semibold text-neutral-900">{v.name}</Text>
-              <Text className="text-xs text-neutral-500">
+              <Text className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{v.name}</Text>
+              <Text className="text-xs text-neutral-500 dark:text-neutral-400">
                 {v.type} · {v.area} · {v.distance_m} m away
               </Text>
             </Pressable>
@@ -673,20 +673,20 @@ function VenuePick({
       ) : null}
 
       <TextInput
-        className="rounded-lg border border-neutral-300 bg-white px-3 py-2 text-base"
+        className="rounded-lg border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 px-3 py-2 text-base"
         placeholder={nearby?.length ? "Somewhere else — search venues" : "Search venues"}
         value={query}
         onChangeText={setQuery}
       />
-      {searching ? <Text className="text-xs text-neutral-500">Searching…</Text> : null}
+      {searching ? <Text className="text-xs text-neutral-500 dark:text-neutral-400">Searching…</Text> : null}
       {results.map((v) => (
         <Pressable
           key={v.id}
-          className="rounded-lg border border-neutral-200 bg-white px-3 py-2"
+          className="rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2"
           onPress={() => onPick(v)}
         >
-          <Text className="text-sm font-semibold text-neutral-900">{v.name}</Text>
-          <Text className="text-xs text-neutral-500">
+          <Text className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{v.name}</Text>
+          <Text className="text-xs text-neutral-500 dark:text-neutral-400">
             {v.type} · {v.area}
           </Text>
         </Pressable>

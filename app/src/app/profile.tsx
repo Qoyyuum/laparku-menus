@@ -84,10 +84,10 @@ function ProfileBody() {
   }
 
   return (
-    <ScrollView className="flex-1 bg-neutral-50" contentContainerClassName="gap-4 p-4">
+    <ScrollView className="flex-1 bg-neutral-50 dark:bg-neutral-900" contentContainerClassName="gap-4 p-4">
       <View className="gap-1">
-        <Text className="text-xl font-bold text-neutral-900">Your profile</Text>
-        <Text className="text-sm text-neutral-600">{session?.user?.email}</Text>
+        <Text className="text-xl font-bold text-neutral-900 dark:text-neutral-100">Your profile</Text>
+        <Text className="text-sm text-neutral-600 dark:text-neutral-300">{session?.user?.email}</Text>
       </View>
 
       {loading ? <ActivityIndicator color="#047857" /> : null}
@@ -98,10 +98,10 @@ function ProfileBody() {
           {STAT_FIELDS.map((f) => (
             <View
               key={f.key}
-              className="min-w-[45%] flex-1 items-center gap-1 rounded-xl border border-neutral-200 bg-white p-4"
+              className="min-w-[45%] flex-1 items-center gap-1 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 p-4"
             >
               <Text className="text-2xl font-bold text-emerald-700">{me[f.key]}</Text>
-              <Text className="text-xs font-medium text-neutral-600">{f.label}</Text>
+              <Text className="text-xs font-medium text-neutral-600 dark:text-neutral-300">{f.label}</Text>
             </View>
           ))}
         </View>
@@ -109,13 +109,13 @@ function ProfileBody() {
 
       {badges ? <BadgeCase badges={badges} /> : null}
 
-      <View className="gap-2 rounded-xl border border-neutral-200 bg-white p-4">
-        <Text className="text-base font-bold text-neutral-900">Display settings</Text>
-        <Text className="text-sm leading-6 text-neutral-600">
+      <View className="gap-2 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 p-4">
+        <Text className="text-base font-bold text-neutral-900 dark:text-neutral-100">Display settings</Text>
+        <Text className="text-sm leading-6 text-neutral-600 dark:text-neutral-300">
           Leaderboards and item credit show “Anonymous” unless you opt in with a display name.
         </Text>
         <TextInput
-          className="rounded-lg border border-neutral-300 px-3 py-2 text-base"
+          className="rounded-lg border border-neutral-300 dark:border-neutral-600 px-3 py-2 text-base"
           placeholder="Display name (e.g. Menu Hunter)"
           maxLength={80}
           value={name}
@@ -123,11 +123,11 @@ function ProfileBody() {
         />
         <View className="flex-row items-center gap-2">
           <Switch value={showBoard} onValueChange={setShowBoard} />
-          <Text className="flex-1 text-sm text-neutral-800">Show my name on leaderboards</Text>
+          <Text className="flex-1 text-sm text-neutral-800 dark:text-neutral-100">Show my name on leaderboards</Text>
         </View>
         <View className="flex-row items-center gap-2">
           <Switch value={showCredit} onValueChange={setShowCredit} />
-          <Text className="flex-1 text-sm text-neutral-800">Credit me on items I contributed</Text>
+          <Text className="flex-1 text-sm text-neutral-800 dark:text-neutral-100">Credit me on items I contributed</Text>
         </View>
         {message ? <Text className="text-sm font-medium text-emerald-700">{message}</Text> : null}
         <Pressable
@@ -140,10 +140,10 @@ function ProfileBody() {
       </View>
 
       <Pressable
-        className="items-center rounded-lg border border-neutral-300 px-4 py-2.5"
+        className="items-center rounded-lg border border-neutral-300 dark:border-neutral-600 px-4 py-2.5"
         onPress={() => authClient.signOut()}
       >
-        <Text className="text-base font-medium text-neutral-800">Sign out</Text>
+        <Text className="text-base font-medium text-neutral-800 dark:text-neutral-100">Sign out</Text>
       </Pressable>
     </ScrollView>
   );
@@ -157,10 +157,10 @@ function BadgeCase({ badges }: { badges: Badge[] }) {
   const earned = badges.filter((b) => b.earned);
   const pending = badges.filter((b) => !b.earned);
   return (
-    <View className="gap-3 rounded-xl border border-neutral-200 bg-white p-4">
-      <Text className="text-base font-bold text-neutral-900">Badges</Text>
+    <View className="gap-3 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 p-4">
+      <Text className="text-base font-bold text-neutral-900 dark:text-neutral-100">Badges</Text>
       {earned.length === 0 ? (
-        <Text className="text-sm text-neutral-600">No badges yet — your first submission earns one.</Text>
+        <Text className="text-sm text-neutral-600 dark:text-neutral-300">No badges yet — your first submission earns one.</Text>
       ) : (
         <View className="flex-row flex-wrap gap-2">
           {earned.map((b) => (
@@ -177,14 +177,14 @@ function BadgeCase({ badges }: { badges: Badge[] }) {
             return (
               <View key={b.key} className="gap-1">
                 <View className="flex-row items-baseline gap-2">
-                  <Text className="flex-1 text-sm font-medium text-neutral-800" numberOfLines={1}>
+                  <Text className="flex-1 text-sm font-medium text-neutral-800 dark:text-neutral-100" numberOfLines={1}>
                     {b.name}
                   </Text>
-                  <Text className="text-xs text-neutral-500">
+                  <Text className="text-xs text-neutral-500 dark:text-neutral-400">
                     {b.progress}/{b.target}
                   </Text>
                 </View>
-                <View className="h-2 overflow-hidden rounded-full bg-neutral-200">
+                <View className="h-2 overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-700">
                   {/* Percentage widths aren't expressible as static
                       nativewind classes — the fill gets an inline style. */}
                   <View className="h-2 rounded-full bg-emerald-600" style={{ width: `${pct}%` }} />

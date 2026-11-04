@@ -254,9 +254,9 @@ function SubmitForm() {
   }
 
   return (
-    <ScrollView className="flex-1 bg-neutral-50" contentContainerClassName="gap-4 p-4">
-      <Text className="text-xl font-bold text-neutral-900">Submit a menu</Text>
-      <Text className="text-sm leading-6 text-neutral-600">
+    <ScrollView className="flex-1 bg-neutral-50 dark:bg-neutral-900" contentContainerClassName="gap-4 p-4">
+      <Text className="text-xl font-bold text-neutral-900 dark:text-neutral-100">Submit a menu</Text>
+      <Text className="text-sm leading-6 text-neutral-600 dark:text-neutral-300">
         Photograph a menu, product or barcode and we will extract the items for review. Scans that
         match a product database go live right away under a pending-verification badge; everything
         else is checked by a reviewer first.
@@ -265,7 +265,7 @@ function SubmitForm() {
       {/* Mode tabs: the classic photo/file form vs the continuous-decode
           scanner. Scanning is the packaged-product path — menus and dishes
           stay on the photo form. */}
-      <View className="flex-row rounded-lg border border-neutral-300 bg-white p-1">
+      <View className="flex-row rounded-lg border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 p-1">
         {(["form", "scan"] as const).map((m) => (
           <Pressable
             key={m}
@@ -275,7 +275,7 @@ function SubmitForm() {
             onPress={() => setMode(m)}
           >
             <Text
-              className={`text-sm font-semibold ${mode === m ? "text-white" : "text-neutral-700"}`}
+              className={`text-sm font-semibold ${mode === m ? "text-white" : "text-neutral-700 dark:text-neutral-300"}`}
             >
               {m === "form" ? "Photos / files" : "Scans"}
             </Text>
@@ -288,18 +288,18 @@ function SubmitForm() {
       ) : (
         <>
       <View className="gap-1.5">
-        <Text className="text-sm font-semibold text-neutral-800">What are you submitting?</Text>
+        <Text className="text-sm font-semibold text-neutral-800 dark:text-neutral-100">What are you submitting?</Text>
         <View className="flex-row flex-wrap gap-2">
           {PICKABLE_SOURCE_TYPES.map((t) => (
             <Pressable
               key={t}
               className={`rounded-full border px-3 py-1.5 ${
-                sourceType === t ? "border-emerald-700 bg-emerald-700" : "border-neutral-300 bg-white"
+                sourceType === t ? "border-emerald-700 bg-emerald-700" : "border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800"
               }`}
               onPress={() => setSourceType(t)}
             >
               <Text
-                className={`text-sm font-medium ${sourceType === t ? "text-white" : "text-neutral-700"}`}
+                className={`text-sm font-medium ${sourceType === t ? "text-white" : "text-neutral-700 dark:text-neutral-300"}`}
               >
                 {SOURCE_LABELS[t] ?? t}
               </Text>
@@ -309,30 +309,30 @@ function SubmitForm() {
       </View>
 
       <View className="gap-1.5">
-        <Text className="text-sm font-semibold text-neutral-800">
+        <Text className="text-sm font-semibold text-neutral-800 dark:text-neutral-100">
           {sourceType === "menu_pdf" ? "PDF files" : "Photos"}{" "}
           {needsFiles ? "(at least one required)" : "(optional)"}
         </Text>
         <View className="flex-row gap-2">
           <Pressable
-            className="rounded-lg border border-neutral-300 bg-white px-3 py-2"
+            className="rounded-lg border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 px-3 py-2"
             onPress={() => pick(false)}
           >
-            <Text className="text-sm font-medium text-neutral-800">
+            <Text className="text-sm font-medium text-neutral-800 dark:text-neutral-100">
               {sourceType === "menu_pdf" ? "Choose PDF files" : "Choose photos"}
             </Text>
           </Pressable>
           {Platform.OS !== "web" && sourceType !== "menu_pdf" ? (
             <Pressable
-              className="rounded-lg border border-neutral-300 bg-white px-3 py-2"
+              className="rounded-lg border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 px-3 py-2"
               onPress={() => pick(true)}
             >
-              <Text className="text-sm font-medium text-neutral-800">Take photo</Text>
+              <Text className="text-sm font-medium text-neutral-800 dark:text-neutral-100">Take photo</Text>
             </Pressable>
           ) : null}
         </View>
         {Platform.OS === "web" ? (
-          <Text className="text-sm text-neutral-500">
+          <Text className="text-sm text-neutral-500 dark:text-neutral-400">
             Tip: you can also paste a screenshot or copied file with Ctrl+V.
           </Text>
         ) : null}
@@ -348,13 +348,13 @@ function SubmitForm() {
                     >
                       <Image
                         source={{ uri: f.uri }}
-                        className="h-20 w-20 rounded-lg border border-neutral-200"
+                        className="h-20 w-20 rounded-lg border border-neutral-200 dark:border-neutral-700"
                         resizeMode="cover"
                       />
                     </Pressable>
                   ) : (
-                    <View className="h-20 w-20 items-center justify-center rounded-lg border border-neutral-200 bg-neutral-100">
-                      <Text className="text-xs font-semibold text-neutral-600">PDF</Text>
+                    <View className="h-20 w-20 items-center justify-center rounded-lg border border-neutral-200 dark:border-neutral-700 bg-neutral-100 dark:bg-neutral-800">
+                      <Text className="text-xs font-semibold text-neutral-600 dark:text-neutral-300">PDF</Text>
                     </View>
                   )}
                   <Pressable
@@ -367,7 +367,7 @@ function SubmitForm() {
                 </View>
               ))}
             </ScrollView>
-            <Text className="text-sm text-neutral-600">
+            <Text className="text-sm text-neutral-600 dark:text-neutral-300">
               {files.length} file{files.length === 1 ? "" : "s"} selected — check the previews, remove
               any that are wrong, then submit.
             </Text>
@@ -376,11 +376,11 @@ function SubmitForm() {
       </View>
 
       <View className="gap-1.5">
-        <Text className="text-sm font-semibold text-neutral-800">
+        <Text className="text-sm font-semibold text-neutral-800 dark:text-neutral-100">
           Where is this from? <Text className="text-red-600">*</Text>
         </Text>
         <TextInput
-          className="rounded-lg border border-neutral-300 bg-white px-3 py-2 text-base"
+          className="rounded-lg border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 px-3 py-2 text-base"
           placeholder={
             sourceType === "url"
               ? "https://… link to the menu"
@@ -390,15 +390,15 @@ function SubmitForm() {
           onChangeText={setProvenance}
           multiline
         />
-        <Text className="text-xs text-neutral-500">
+        <Text className="text-xs text-neutral-500 dark:text-neutral-400">
           Provenance helps reviewers verify the menu is real. It is required.
         </Text>
       </View>
 
       <View className="gap-1.5">
-        <Text className="text-sm font-semibold text-neutral-800">Email (optional)</Text>
+        <Text className="text-sm font-semibold text-neutral-800 dark:text-neutral-100">Email (optional)</Text>
         <TextInput
-          className="rounded-lg border border-neutral-300 bg-white px-3 py-2 text-base"
+          className="rounded-lg border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 px-3 py-2 text-base"
           placeholder="Get credit for your submissions"
           autoCapitalize="none"
           keyboardType="email-address"
@@ -445,7 +445,7 @@ function SubmitForm() {
             />
           ) : null}
           <Pressable
-            className="absolute right-4 top-4 h-9 w-9 items-center justify-center rounded-full bg-white/20"
+            className="absolute right-4 top-4 h-9 w-9 items-center justify-center rounded-full bg-white dark:bg-neutral-800/20"
             accessibilityLabel="Close preview"
             onPress={() => setPreviewUri(null)}
           >

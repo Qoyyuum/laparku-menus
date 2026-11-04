@@ -11,9 +11,9 @@ function ExternalLink({ href, label }: { href: string; label: string }) {
 
 export default function AboutScreen() {
   return (
-    <ScrollView className="flex-1 bg-neutral-50" contentContainerClassName="gap-4 p-4">
-      <Text className="text-xl font-bold text-neutral-900">Laparku Menus</Text>
-      <Text className="text-sm leading-6 text-neutral-700">
+    <ScrollView className="flex-1 bg-neutral-50 dark:bg-neutral-900" contentContainerClassName="gap-4 p-4">
+      <Text className="text-xl font-bold text-neutral-900 dark:text-neutral-100">Laparku Menus</Text>
+      <Text className="text-sm leading-6 text-neutral-700 dark:text-neutral-300">
         Crowdsourced food menus and nutrition estimates for Brunei — dishes at restaurants and
         stalls, plus packaged products in grocers and supermarkets. Data is submitted by the
         community and may contain machine-generated estimates; always verify halal status and
@@ -29,7 +29,7 @@ export default function AboutScreen() {
         <Link href="/submit" className="text-sm font-medium text-emerald-700">
           Submit a menu or product →
         </Link>
-        <Link href="/admin" className="text-sm font-medium text-neutral-500">
+        <Link href="/admin" className="text-sm font-medium text-neutral-500 dark:text-neutral-400">
           Admin →
         </Link>
       </View>

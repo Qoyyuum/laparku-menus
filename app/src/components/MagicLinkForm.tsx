@@ -35,20 +35,20 @@ export function MagicLinkForm({
 
   return (
     <>
-      <Text className="text-lg font-bold text-neutral-900">{title}</Text>
+      <Text className="text-lg font-bold text-neutral-900 dark:text-neutral-100">{title}</Text>
       {subtitle && !sent ? (
-        <Text className="text-sm leading-5 text-neutral-600">{subtitle}</Text>
+        <Text className="text-sm leading-5 text-neutral-600 dark:text-neutral-300">{subtitle}</Text>
       ) : null}
       {notice ? <Text className="text-sm leading-5 text-amber-700">{notice}</Text> : null}
       {sent ? (
-        <Text className="text-sm leading-6 text-neutral-600">
+        <Text className="text-sm leading-6 text-neutral-600 dark:text-neutral-300">
           Check your email — we sent a sign-in link to {email}. Open it on this device to
           continue.
         </Text>
       ) : (
         <>
           <TextInput
-            className="rounded-lg border border-neutral-300 px-3 py-2 text-base"
+            className="rounded-lg border border-neutral-300 dark:border-neutral-600 px-3 py-2 text-base"
             placeholder="you@example.com"
             autoCapitalize="none"
             autoComplete="email"

@@ -11,24 +11,24 @@ interface Props {
 export function ItemCard({ item, venue }: Props) {
   const n = item.nutrition_estimate;
   return (
-    <View className="gap-1.5 rounded-xl border border-neutral-200 bg-white p-4">
+    <View className="gap-1.5 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 p-4">
       <View className="flex-row items-start justify-between gap-2">
         <View className="flex-1">
-          <Text className="text-base font-semibold text-neutral-900">{item.name}</Text>
-          {item.name_ms ? <Text className="text-sm text-neutral-500">{item.name_ms}</Text> : null}
+          <Text className="text-base font-semibold text-neutral-900 dark:text-neutral-100">{item.name}</Text>
+          {item.name_ms ? <Text className="text-sm text-neutral-500 dark:text-neutral-400">{item.name_ms}</Text> : null}
         </View>
         <Text className="text-base font-bold text-emerald-700">{formatBnd(item.price_bnd)}</Text>
       </View>
 
       {item.description ? (
-        <Text className="text-sm text-neutral-600" numberOfLines={2}>
+        <Text className="text-sm text-neutral-600 dark:text-neutral-300" numberOfLines={2}>
           {item.description}
         </Text>
       ) : null}
 
       {venue ? (
         <View className="flex-row flex-wrap items-center gap-2">
-          <Text className="text-xs text-neutral-500">
+          <Text className="text-xs text-neutral-500 dark:text-neutral-400">
             {venue.name} · {venue.area}
           </Text>
           <HalalBadge status={venue.halal_status} />
@@ -36,7 +36,7 @@ export function ItemCard({ item, venue }: Props) {
       ) : null}
 
       {n ? (
-        <Text className="text-xs text-neutral-500">
+        <Text className="text-xs text-neutral-500 dark:text-neutral-400">
           {n.calories_kcal != null ? `~${Math.round(n.calories_kcal)} kcal` : ""}
           {n.protein_g != null ? ` · P ${n.protein_g}g` : ""}
           {n.carbs_g != null ? ` · C ${n.carbs_g}g` : ""}
@@ -47,8 +47,8 @@ export function ItemCard({ item, venue }: Props) {
 
       <View className="flex-row flex-wrap items-center gap-1.5">
         {item.category ? (
-          <View className="rounded-full bg-neutral-100 px-2 py-0.5">
-            <Text className="text-xs text-neutral-600">{item.category}</Text>
+          <View className="rounded-full bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5">
+            <Text className="text-xs text-neutral-600 dark:text-neutral-300">{item.category}</Text>
           </View>
         ) : null}
         {item.tags.map((tag) => (
@@ -62,7 +62,7 @@ export function ItemCard({ item, venue }: Props) {
       </View>
 
       {item.contributed_by ? (
-        <Text className="text-xs text-neutral-500">contributed by {item.contributed_by}</Text>
+        <Text className="text-xs text-neutral-500 dark:text-neutral-400">contributed by {item.contributed_by}</Text>
       ) : null}
     </View>
   );

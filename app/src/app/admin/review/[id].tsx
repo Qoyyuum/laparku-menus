@@ -95,11 +95,11 @@ function Chip({
   return (
     <Pressable
       className={`rounded-full border px-3 py-1 ${
-        selected ? "border-emerald-700 bg-emerald-700" : "border-neutral-300 bg-white"
+        selected ? "border-emerald-700 bg-emerald-700" : "border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800"
       }`}
       onPress={onPress}
     >
-      <Text className={`text-xs font-medium ${selected ? "text-white" : "text-neutral-700"}`}>
+      <Text className={`text-xs font-medium ${selected ? "text-white" : "text-neutral-700 dark:text-neutral-300"}`}>
         {label}
       </Text>
     </Pressable>
@@ -268,14 +268,14 @@ function ReviewForm({ id }: { id: string }) {
 
   if (error && !sub) {
     return (
-      <View className="flex-1 items-center justify-center bg-neutral-50 p-4">
+      <View className="flex-1 items-center justify-center bg-neutral-50 dark:bg-neutral-900 p-4">
         <Text className="text-sm text-red-600">{error}</Text>
       </View>
     );
   }
   if (!sub) {
     return (
-      <View className="flex-1 items-center justify-center bg-neutral-50">
+      <View className="flex-1 items-center justify-center bg-neutral-50 dark:bg-neutral-900">
         <ActivityIndicator color="#047857" />
       </View>
     );
@@ -283,20 +283,20 @@ function ReviewForm({ id }: { id: string }) {
   const decided = sub.status !== "pending_review";
 
   return (
-    <ScrollView className="flex-1 bg-neutral-50">
+    <ScrollView className="flex-1 bg-neutral-50 dark:bg-neutral-900">
       <Stack.Screen options={{ title: "Review submission" }} />
       {/* Side-by-side on wide screens (web), stacked on narrow. */}
       <View className="flex-col gap-4 p-4 lg:flex-row">
         {/* Left: source material */}
         <View className="gap-3 lg:w-1/2">
-          <Text className="text-base font-bold text-neutral-900">Source</Text>
-          <View className="gap-1 rounded-xl border border-neutral-200 bg-white p-3">
-            <Text className="text-xs text-neutral-600">
+          <Text className="text-base font-bold text-neutral-900 dark:text-neutral-100">Source</Text>
+          <View className="gap-1 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 p-3">
+            <Text className="text-xs text-neutral-600 dark:text-neutral-300">
               {sub.source_type} · submitted {new Date(sub.created_at).toLocaleString()}
             </Text>
-            <Text className="text-sm text-neutral-800">Provenance: {sub.provenance}</Text>
+            <Text className="text-sm text-neutral-800 dark:text-neutral-100">Provenance: {sub.provenance}</Text>
             {sub.contact ? (
-              <Text className="text-xs text-neutral-600">Contact: {sub.contact}</Text>
+              <Text className="text-xs text-neutral-600 dark:text-neutral-300">Contact: {sub.contact}</Text>
             ) : null}
             {sub.auto_flags.length > 0 ? (
               <Text className="text-xs font-medium text-amber-800">
@@ -305,7 +305,7 @@ function ReviewForm({ id }: { id: string }) {
             ) : null}
           </View>
           {sub.image_keys.length === 0 ? (
-            <Text className="text-sm text-neutral-500">No source images ({sub.source_type}).</Text>
+            <Text className="text-sm text-neutral-500 dark:text-neutral-400">No source images ({sub.source_type}).</Text>
           ) : (
             sub.image_keys.map((key) => (
               <Image
@@ -320,19 +320,19 @@ function ReviewForm({ id }: { id: string }) {
 
         {/* Right: editable draft + decision */}
         <View className="gap-3 lg:w-1/2">
-          <Text className="text-base font-bold text-neutral-900">Draft</Text>
+          <Text className="text-base font-bold text-neutral-900 dark:text-neutral-100">Draft</Text>
 
           {decided ? (
-            <Text className="rounded-lg bg-neutral-100 p-2 text-sm text-neutral-700">
+            <Text className="rounded-lg bg-neutral-100 dark:bg-neutral-800 p-2 text-sm text-neutral-700 dark:text-neutral-300">
               Already decided: {sub.status}
               {sub.rejection_reason ? ` — ${sub.rejection_reason}` : ""}
             </Text>
           ) : null}
 
-          <View className="gap-2 rounded-xl border border-neutral-200 bg-white p-3">
-            <Text className="text-sm font-semibold text-neutral-800">Venue</Text>
+          <View className="gap-2 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 p-3">
+            <Text className="text-sm font-semibold text-neutral-800 dark:text-neutral-100">Venue</Text>
             <TextInput
-              className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+              className="rounded-lg border border-neutral-300 dark:border-neutral-600 px-3 py-2 text-sm"
               placeholder="Search existing venue…"
               value={venueQuery}
               onChangeText={searchVenues}
@@ -343,11 +343,11 @@ function ReviewForm({ id }: { id: string }) {
                   <Pressable
                     key={v.id}
                     className={`rounded-lg border px-2 py-1.5 ${
-                      existingVenue?.id === v.id ? "border-emerald-700 bg-emerald-50" : "border-neutral-200"
+                      existingVenue?.id === v.id ? "border-emerald-700 bg-emerald-50" : "border-neutral-200 dark:border-neutral-700"
                     }`}
                     onPress={() => setExistingVenue(existingVenue?.id === v.id ? null : v)}
                   >
-                    <Text className="text-sm text-neutral-800">
+                    <Text className="text-sm text-neutral-800 dark:text-neutral-100">
                       {v.name} · {v.area}
                     </Text>
                   </Pressable>
@@ -371,7 +371,7 @@ function ReviewForm({ id }: { id: string }) {
                     onPress={() => setMode("merge")}
                   />
                 </View>
-                <Text className="text-xs text-neutral-600">
+                <Text className="text-xs text-neutral-600 dark:text-neutral-300">
                   {mode === "replace"
                     ? "The venue's current items are all superseded; only the draft below goes live."
                     : "Pick which existing items stay live and which draft rows to add. Anything not kept is superseded, not deleted."}
@@ -380,7 +380,7 @@ function ReviewForm({ id }: { id: string }) {
             ) : (
               <>
                 <TextInput
-                  className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                  className="rounded-lg border border-neutral-300 dark:border-neutral-600 px-3 py-2 text-sm"
                   placeholder="New venue name *"
                   value={venueName}
                   onChangeText={setVenueName}
@@ -400,8 +400,8 @@ function ReviewForm({ id }: { id: string }) {
           </View>
 
           {merging ? (
-            <View className="gap-2 rounded-xl border border-neutral-200 bg-white p-3">
-              <Text className="text-sm font-semibold text-neutral-800">
+            <View className="gap-2 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 p-3">
+              <Text className="text-sm font-semibold text-neutral-800 dark:text-neutral-100">
                 Existing menu ({keepIds.size}/{existingItems.length} kept)
               </Text>
               {menuTruncated ? (
@@ -411,23 +411,23 @@ function ReviewForm({ id }: { id: string }) {
                 </Text>
               ) : null}
               {existingItems.length === 0 ? (
-                <Text className="text-xs text-neutral-500">This venue has no current items.</Text>
+                <Text className="text-xs text-neutral-500 dark:text-neutral-400">This venue has no current items.</Text>
               ) : (
                 existingItems.map((item) => (
                   <Pressable
                     key={item.id}
                     className={`flex-row items-center justify-between rounded-lg border px-2 py-1.5 ${
-                      keepIds.has(item.id) ? "border-emerald-300 bg-emerald-50" : "border-neutral-200 opacity-60"
+                      keepIds.has(item.id) ? "border-emerald-300 bg-emerald-50" : "border-neutral-200 dark:border-neutral-700 opacity-60"
                     }`}
                     onPress={() => toggleKeep(item.id)}
                   >
-                    <Text className="flex-1 text-sm text-neutral-800" numberOfLines={1}>
+                    <Text className="flex-1 text-sm text-neutral-800 dark:text-neutral-100" numberOfLines={1}>
                       {item.name}
                     </Text>
-                    <Text className="mx-2 text-xs text-neutral-500">{formatBnd(item.price_bnd)}</Text>
+                    <Text className="mx-2 text-xs text-neutral-500 dark:text-neutral-400">{formatBnd(item.price_bnd)}</Text>
                     <Text
                       className={`text-xs font-semibold ${
-                        keepIds.has(item.id) ? "text-emerald-700" : "text-neutral-500"
+                        keepIds.has(item.id) ? "text-emerald-700" : "text-neutral-500 dark:text-neutral-400"
                       }`}
                     >
                       {keepIds.has(item.id) ? "keep" : "drop"}
@@ -438,18 +438,18 @@ function ReviewForm({ id }: { id: string }) {
             </View>
           ) : null}
 
-          <View className="gap-2 rounded-xl border border-neutral-200 bg-white p-3">
+          <View className="gap-2 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 p-3">
             <View className="flex-row items-center justify-between">
-              <Text className="text-sm font-semibold text-neutral-800">
+              <Text className="text-sm font-semibold text-neutral-800 dark:text-neutral-100">
                 Items ({items.length})
               </Text>
               <Pressable
-                className="rounded-lg border border-neutral-300 px-2 py-1"
+                className="rounded-lg border border-neutral-300 dark:border-neutral-600 px-2 py-1"
                 onPress={() =>
                   setItems((prev) => [...prev, { name: "", item_type: "dish", priceText: "" }])
                 }
               >
-                <Text className="text-xs font-medium text-neutral-700">+ add item</Text>
+                <Text className="text-xs font-medium text-neutral-700 dark:text-neutral-300">+ add item</Text>
               </Pressable>
             </View>
             {items.map((item, i) => {
@@ -458,18 +458,18 @@ function ReviewForm({ id }: { id: string }) {
               return (
               <View
                 key={i}
-                className={`gap-1.5 rounded-lg border border-neutral-200 p-2 ${dropped ? "opacity-50" : ""}`}
+                className={`gap-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 p-2 ${dropped ? "opacity-50" : ""}`}
               >
                 {merging ? (
                   <View className="flex-row items-center justify-between">
-                    <Text className="flex-1 text-xs text-neutral-500" numberOfLines={1}>
+                    <Text className="flex-1 text-xs text-neutral-500 dark:text-neutral-400" numberOfLines={1}>
                       {match
                         ? `≈ matches existing "${match.name}" (${formatBnd(match.price_bnd)})`
                         : "new item"}
                     </Text>
                     <Pressable onPress={() => toggleDropDraft(i)}>
                       <Text
-                        className={`text-xs font-semibold ${dropped ? "text-neutral-500" : "text-emerald-700"}`}
+                        className={`text-xs font-semibold ${dropped ? "text-neutral-500 dark:text-neutral-400" : "text-emerald-700"}`}
                       >
                         {dropped ? "skip" : "add"}
                       </Text>
@@ -478,13 +478,13 @@ function ReviewForm({ id }: { id: string }) {
                 ) : null}
                 <View className="flex-row items-center gap-2">
                   <TextInput
-                    className="flex-1 rounded border border-neutral-300 px-2 py-1 text-sm"
+                    className="flex-1 rounded border border-neutral-300 dark:border-neutral-600 px-2 py-1 text-sm"
                     placeholder="Item name *"
                     value={item.name}
                     onChangeText={(name) => updateItem(i, { name })}
                   />
                   <TextInput
-                    className="w-20 rounded border border-neutral-300 px-2 py-1 text-sm"
+                    className="w-20 rounded border border-neutral-300 dark:border-neutral-600 px-2 py-1 text-sm"
                     placeholder="B$"
                     keyboardType="decimal-pad"
                     value={item.priceText}
@@ -506,7 +506,7 @@ function ReviewForm({ id }: { id: string }) {
                     ))}
                   </View>
                   <TextInput
-                    className="flex-1 rounded border border-neutral-300 px-2 py-1 text-sm"
+                    className="flex-1 rounded border border-neutral-300 dark:border-neutral-600 px-2 py-1 text-sm"
                     placeholder="Category"
                     value={item.category ?? ""}
                     onChangeText={(category) => updateItem(i, { category })}
@@ -536,13 +536,13 @@ function ReviewForm({ id }: { id: string }) {
                 </Text>
               </Pressable>
               <TextInput
-                className="rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm"
+                className="rounded-lg border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 px-3 py-2 text-sm"
                 placeholder="Rejection reason (required to reject)"
                 value={rejectReason}
                 onChangeText={setRejectReason}
               />
               <Pressable
-                className="items-center rounded-lg border border-red-300 bg-white px-4 py-3 disabled:opacity-50"
+                className="items-center rounded-lg border border-red-300 bg-white dark:bg-neutral-800 px-4 py-3 disabled:opacity-50"
                 disabled={busy !== null || rejectReason.trim() === ""}
                 onPress={() => decide("reject")}
               >

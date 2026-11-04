@@ -52,11 +52,11 @@ function CheckInWidget({ venueId }: { venueId: string }) {
   }
 
   return (
-    <View className="gap-2 rounded-xl border border-neutral-200 bg-white p-4">
+    <View className="gap-2 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 p-4">
       {done ? (
         <Text className="text-sm text-emerald-700">Checked in — thanks for the visit report!</Text>
       ) : !session ? (
-        <Text className="text-sm text-neutral-500">Sign in to check in here.</Text>
+        <Text className="text-sm text-neutral-500 dark:text-neutral-400">Sign in to check in here.</Text>
       ) : !asked ? (
         <Pressable
           className="items-center rounded-lg border border-emerald-700 bg-emerald-700 px-4 py-2.5 disabled:opacity-50"
@@ -67,7 +67,7 @@ function CheckInWidget({ venueId }: { venueId: string }) {
         </Pressable>
       ) : (
         <View className="gap-2">
-          <Text className="text-sm font-semibold text-neutral-800">Was the menu accurate?</Text>
+          <Text className="text-sm font-semibold text-neutral-800 dark:text-neutral-100">Was the menu accurate?</Text>
           <View className="flex-row gap-2">
             <Pressable
               className="flex-1 items-center rounded-lg border border-emerald-700 bg-emerald-700 px-3 py-2.5 disabled:opacity-50"
@@ -77,18 +77,18 @@ function CheckInWidget({ venueId }: { venueId: string }) {
               <Text className="text-sm font-semibold text-white">Yes</Text>
             </Pressable>
             <Pressable
-              className="flex-1 items-center rounded-lg border border-neutral-300 bg-white px-3 py-2.5 disabled:opacity-50"
+              className="flex-1 items-center rounded-lg border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 px-3 py-2.5 disabled:opacity-50"
               disabled={busy}
               onPress={() => checkin(false)}
             >
-              <Text className="text-sm font-semibold text-neutral-800">Not quite</Text>
+              <Text className="text-sm font-semibold text-neutral-800 dark:text-neutral-100">Not quite</Text>
             </Pressable>
             <Pressable
               className="flex-1 items-center rounded-lg px-3 py-2.5 disabled:opacity-50"
               disabled={busy}
               onPress={() => checkin()}
             >
-              <Text className="text-sm font-medium text-neutral-500">Skip</Text>
+              <Text className="text-sm font-medium text-neutral-500 dark:text-neutral-400">Skip</Text>
             </Pressable>
           </View>
         </View>
@@ -136,8 +136,8 @@ function VerifyWidget({ venueId }: { venueId: string }) {
   }
 
   return (
-    <View className="gap-2 rounded-xl border border-neutral-200 bg-white p-4">
-      <Text className="text-sm font-semibold text-neutral-800">Is this menu still current?</Text>
+    <View className="gap-2 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 p-4">
+      <Text className="text-sm font-semibold text-neutral-800 dark:text-neutral-100">Is this menu still current?</Text>
       {vote !== null ? (
         <Text className="text-sm text-emerald-700">
           Thanks — your {vote ? "👍" : "👎"} helps reviewers know what needs checking.
@@ -152,15 +152,15 @@ function VerifyWidget({ venueId }: { venueId: string }) {
             <Text className="text-base font-semibold text-white">👍 Yes, still current</Text>
           </Pressable>
           <Pressable
-            className="flex-1 items-center rounded-lg border border-neutral-300 bg-white px-4 py-2.5 disabled:opacity-50"
+            className="flex-1 items-center rounded-lg border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 px-4 py-2.5 disabled:opacity-50"
             disabled={busy}
             onPress={() => cast(false)}
           >
-            <Text className="text-base font-semibold text-neutral-800">👎 It's out of date</Text>
+            <Text className="text-base font-semibold text-neutral-800 dark:text-neutral-100">👎 It's out of date</Text>
           </Pressable>
         </View>
       ) : (
-        <Text className="text-sm text-neutral-500">Sign in to tell us.</Text>
+        <Text className="text-sm text-neutral-500 dark:text-neutral-400">Sign in to tell us.</Text>
       )}
       {error ? <Text className="text-sm text-red-600">{error}</Text> : null}
     </View>
@@ -199,13 +199,13 @@ export default function VenueScreen() {
   const freshness = params.freshness ? FRESHNESS_LABELS[params.freshness] : undefined;
 
   return (
-    <ScrollView className="flex-1 bg-neutral-50" contentContainerClassName="gap-4 p-4">
+    <ScrollView className="flex-1 bg-neutral-50 dark:bg-neutral-900" contentContainerClassName="gap-4 p-4">
       <Stack.Screen options={{ title: params.name ?? "Venue" }} />
 
       <View className="gap-1.5">
-        <Text className="text-xl font-bold text-neutral-900">{params.name ?? "Venue"}</Text>
+        <Text className="text-xl font-bold text-neutral-900 dark:text-neutral-100">{params.name ?? "Venue"}</Text>
         <View className="flex-row items-center gap-2">
-          <Text className="text-sm text-neutral-600">
+          <Text className="text-sm text-neutral-600 dark:text-neutral-300">
             {[params.type, params.area].filter(Boolean).join(" · ") || "—"}
           </Text>
           {params.halal_status ? <HalalBadge status={params.halal_status} /> : null}
@@ -227,7 +227,7 @@ export default function VenueScreen() {
       {loading ? <ActivityIndicator color="#047857" /> : null}
       {error ? <Text className="text-sm text-red-600">{error}</Text> : null}
       {!loading && !error && items.length === 0 ? (
-        <Text className="py-8 text-center text-neutral-500">No published items yet.</Text>
+        <Text className="py-8 text-center text-neutral-500 dark:text-neutral-400">No published items yet.</Text>
       ) : null}
 
       <View className="gap-2">
