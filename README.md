@@ -27,6 +27,31 @@ missing; rebuild it manually with `bun run build:web` after app changes.
 For native builds set `EXPO_PUBLIC_API_URL` to the deployed worker API URL
 (e.g. `https://laparku-menus.bbdl.workers.dev/api`); web defaults to same-origin `/api`.
 
+### Running locally (dev server + magic-link sign-in)
+
+```bash
+bunx wrangler d1 migrations apply laparku-menus-db --local   # one-time: local D1 starts empty
+bun run dev        # → Ready on http://127.0.0.1:8787
+```
+
+Two gotchas that bite on first run:
+
+- **Local D1 starts empty** — better-auth 500s on sign-in (`Missing tables
+  user, session, account, verification, apikey`) until migrations are applied
+  with `--local` (command above).
+- **Magic links are built against `PUBLIC_BASE_URL`** — set it in `.dev.vars`
+  (gitignored) or your link points at production, not localhost:
+
+  ```ini
+  PUBLIC_BASE_URL=http://localhost:8787
+  EXTRACTOR=stub
+  ```
+
+To test sign-in locally without Resend: request a link in the app (log-in
+icon → `/signin` → email → "Email me a sign-in link"), then copy the
+`magic link for <email>: <url>` line printed in the dev console and open it —
+it 302s to the callback route and sets the session cookie.
+
 ## Deploy
 
 Everything except a handful of secrets is in `wrangler.toml` — see
