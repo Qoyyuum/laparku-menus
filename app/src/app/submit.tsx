@@ -10,7 +10,9 @@ import { Turnstile } from "../components/Turnstile";
 
 // Source types the photo-upload form can produce (manual_entry is the
 // signed-in text form; url submissions carry their link in provenance).
-const PICKABLE_SOURCE_TYPES = SOURCE_TYPES.filter((t) => t !== "manual_entry");
+// The barcode option is superseded by the Scans tab (continuous-decode
+// camera) — the classic form keeps photo/PDF/url upload only.
+const PICKABLE_SOURCE_TYPES = SOURCE_TYPES.filter((t) => t !== "manual_entry" && t !== "barcode");
 const MAX_FILES = 10;
 const TURNSTILE_SITEKEY = process.env.EXPO_PUBLIC_TURNSTILE_SITEKEY ?? "";
 

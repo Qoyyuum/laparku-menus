@@ -577,10 +577,17 @@ function VenuePick({
     setLocating(true);
     setLocMsg(null);
     try {
-      const perm = await Location.requestForegroundPermissionsAsync();
-      if (!perm.granted) {
-        setLocMsg("Location permission denied — search for the venue below instead.");
-        return;
+      // Web has no separate permission-request API — getCurrentPosition
+      // triggers the browser prompt itself. expo-location's
+      // requestForegroundPermissionsAsync on web can return undefined or
+      // never resolve, which silently killed the button. Only gate on
+      // native.
+      if (Platform.OS !== "web") {
+        const perm = await Location.requestForegroundPermissionsAsync();
+        if (!perm.granted) {
+          setLocMsg("Location permission denied — search for the venue below instead.");
+          return;
+        }
       }
       const pos = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
