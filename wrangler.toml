@@ -43,6 +43,10 @@ max_retries = 3
 directory = "./app/dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
+# Worker must see /api/* before the SPA fallback — without this, browser
+# navigations (Sec-Fetch-Mode: navigate, e.g. magic-link clicks) get served
+# index.html by the assets binding and never reach the API.
+run_worker_first = ["/api/*", "/mcp"]
 
 [ai]
 binding = "AI"
