@@ -220,3 +220,50 @@ it("refresh is skipped when GRAVATAR_API_KEY is unset", async () => {
     env.GRAVATAR_API_KEY = prevKey || "";
   }
 });
+
+// --- avatar ------------------------------------------------------------------
+
+// Minimal valid-signature payloads — sniffMagic only checks magic bytes.
+const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+const PDF_BYTES = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34]);
+
+async function postAvatar(cookie: string, body: Uint8Array, contentType = "image/png") {
+  return SELF.fetch("https://x/api/me/avatar", {
+    method: "POST",
+    headers: { "content-type": contentType, cookie },
+    body: body as unknown as BodyInit,
+  });
+}
+
+it("avatar upload→serve→delete round-trips through R2", async () => {
+  const u = await forgeSession("submitter");
+  const up = await postAvatar(u.cookie, PNG_BYTES);
+  expect(up.status).toBe(200);
+  expect(((await up.json()) as { avatar_url: string }).avatar_url).toBe(`/api/avatar/${u.userId}`);
+
+  // /api/me now reports the uploaded avatar instead of gravatar.
+  expect((await getMe(u.cookie)).avatar_url).toBe(`/api/avatar/${u.userId}`);
+
+  const img = await SELF.fetch(`https://x/api/avatar/${u.userId}`);
+  expect(img.status).toBe(200);
+  expect(img.headers.get("content-type")).toBe("image/png");
+  expect(img.headers.get("cache-control")).toContain("public");
+  expect(new Uint8Array(await img.arrayBuffer())).toEqual(PNG_BYTES);
+
+  const del = await SELF.fetch("https://x/api/me/avatar", { method: "DELETE", headers: { cookie: u.cookie } });
+  expect(del.status).toBe(200);
+  expect(((await del.json()) as { avatar_url: string }).avatar_url).toContain("gravatar.com/avatar/");
+  expect((await SELF.fetch(`https://x/api/avatar/${u.userId}`)).status).toBe(404);
+});
+
+it("avatar upload rejects non-images, oversize, and unauthenticated callers", async () => {
+  const u = await forgeSession("submitter");
+  expect((await postAvatar(u.cookie, PDF_BYTES, "application/pdf")).status).toBe(400);
+  // Declared png but actually pdf bytes → sniff wins over the header.
+  expect((await postAvatar(u.cookie, PDF_BYTES, "image/png")).status).toBe(400);
+  const big = new Uint8Array(2 * 1024 * 1024 + 1);
+  big.set(PNG_BYTES);
+  expect((await postAvatar(u.cookie, big)).status).toBe(413);
+  expect((await postAvatar("", PNG_BYTES)).status).toBe(401);
+  expect((await SELF.fetch("https://x/api/avatar/no-such-user")).status).toBe(404);
+});
