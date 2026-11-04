@@ -37,6 +37,11 @@ queue = "laparku-menus-submissions"
 queue = "laparku-menus-submissions"
 max_retries = 3
 
+# Workers Builds (git-connected CI): app/dist is gitignored, so a CI deploy
+# must install deps and rebuild the Expo web export before uploading.
+[build]
+command = "bun install && bun run build:web"
+
 # Expo web export output — the worker serves it for all non-/api paths with an
 # SPA fallback to index.html (see src/index.ts).
 [assets]
