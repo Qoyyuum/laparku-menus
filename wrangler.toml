@@ -2,10 +2,17 @@ name = "laparku-menus"
 main = "src/index.ts"
 compatibility_date = "2026-08-22"
 compatibility_flags = ["nodejs_compat"]
+# Custom domain — Cloudflare provisions cert + DNS automatically since
+# laparku.co.bn is a zone on this account.
+routes = [
+  { pattern = "menu.laparku.co.bn", custom_domain = true },
+]
+# Keep the *.workers.dev URL serving too — links already circulated point there.
+workers_dev = true
 
 [vars]
 # Doubles as the better-auth baseURL — magic links are built against it.
-PUBLIC_BASE_URL = "https://laparku-menus.bbdl.workers.dev"
+PUBLIC_BASE_URL = "https://menu.laparku.co.bn"
 # Cloudflare Turnstile site key — replace after creating the widget in the CF
 # dashboard (Security → Turnstile). The matching secret is TURNSTILE_SECRET_KEY.
 # Until set, Turnstile verification is not active.
