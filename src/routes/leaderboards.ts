@@ -67,10 +67,13 @@ function countedSource(kind: Kind): CountedSource {
 // as { rank, name, count } plus `me`, the caller's own { rank, count } —
 // null for anonymous callers and callers with no qualifying rows.
 //
-// Opt-in privacy (Review Focus #5): rows render `display_name` only when the
-// user set show_on_leaderboard; every other row — and opted-in users with an
-// empty name — renders "Anonymous". `user` is the untracked better-auth
-// table, so the join is raw SQL and the row carries no id/email at all.
+// Opt-in privacy (Review Focus #5): rows render a name only when the user
+// set show_on_leaderboard — and that name is their Gravatar-VERIFIED social
+// handle (preferred_social), never freeform text: display_name can't be
+// moderated at scale, so it no longer renders here at all. Every other row
+// — and opted-in users without a verified handle — renders "Anonymous".
+// `user` is the untracked better-auth table, so the join is raw SQL and the
+// row carries no id/email at all.
 //
 // Many small boards by design: when the caller is signed in and doesn't pass
 // `area`, the board defaults to the area they check into most (their home
@@ -121,8 +124,6 @@ leaderboardsApi.get("/leaderboards", async (c) => {
 
   const rows = (await db.all(sql`
     SELECT t.user_id AS user_id, t.n AS n,
-      CASE WHEN u.show_on_leaderboard = 1 AND u.display_name IS NOT NULL AND u.display_name <> ''
-        THEN u.display_name ELSE 'Anonymous' END AS name,
       u.show_on_leaderboard AS show_on_leaderboard
     FROM (
       SELECT c.user_id AS user_id, count(DISTINCT c.id) AS n
@@ -131,25 +132,29 @@ leaderboardsApi.get("/leaderboards", async (c) => {
     LEFT JOIN "user" AS u ON u.id = t.user_id
     ORDER BY t.n DESC, t.user_id ASC
     LIMIT ${BOARD_SIZE}
-  `)) as { user_id: string; n: number; name: string; show_on_leaderboard: number | null }[];
+  `)) as { user_id: string; n: number; show_on_leaderboard: number | null }[];
 
-  // Badge flair (Task 8): each OPTED-IN row carries its user's
-  // highest-tier badge key — badges leak activity patterns, so opted-out
-  // rows always read null, same privacy gate as /api/users/:id/badges.
-  // One batched pass for the whole board, not a lookup per row.
+  // Opted-in rows get their name + badge flair in two batched passes — never
+  // a lookup per row. The name is the verified social handle; the badge is
+  // their highest-tier key — both leak activity patterns, so the same
+  // show_on_leaderboard gate covers both.
   const optedIn = rows.filter((r) => Number(r.show_on_leaderboard) === 1).map((r) => r.user_id);
-  const topBadges = await getTopBadges(db, optedIn);
+  const [topBadges, socialNames] = await Promise.all([
+    getTopBadges(db, optedIn),
+    getSocialNames(db, optedIn),
+  ]);
 
   // Competition ranking (1 + count of strictly-greater entries) so ties
   // share a rank — the same rule `me` is computed with below.
   let rank = 0;
   const board = rows.map((r, i) => {
     if (i === 0 || Number(r.n) !== Number(rows[i - 1]!.n)) rank = i + 1;
+    const opted = Number(r.show_on_leaderboard) === 1;
     return {
       rank,
-      name: String(r.name),
+      name: opted ? (socialNames.get(r.user_id) ?? "Anonymous") : "Anonymous",
       count: Number(r.n),
-      top_badge: Number(r.show_on_leaderboard) === 1 ? (topBadges.get(r.user_id) ?? null) : null,
+      top_badge: opted ? (topBadges.get(r.user_id) ?? null) : null,
     };
   });
 
@@ -173,6 +178,41 @@ leaderboardsApi.get("/leaderboards", async (c) => {
 
   return c.json({ board, me, area: effectiveArea ?? null });
 });
+
+// The board's public name: the handle of the user's preferred_social, read
+// off their cached Gravatar verified-accounts snapshot. One batched query
+// for the opted-in set (same shape as getTopBadges). A missing preferred
+// pick, an empty/malformed snapshot, or a platform that vanished from the
+// snapshot all yield no name → the row renders "Anonymous".
+async function getSocialNames(db: ReturnType<typeof getDb>, userIds: string[]): Promise<Map<string, string>> {
+  const names = new Map<string, string>();
+  if (userIds.length === 0) return names;
+  const rows = (await db.all(sql`
+    SELECT id, preferred_social, gravatar_accounts FROM "user"
+    WHERE id IN (${sql.join(
+      userIds.map((id) => sql`${id}`),
+      sql`, `,
+    )})
+  `)) as { id: string; preferred_social: string | null; gravatar_accounts: string | null }[];
+  for (const r of rows) {
+    if (!r.preferred_social || !r.gravatar_accounts) continue;
+    try {
+      const accounts: unknown = JSON.parse(r.gravatar_accounts);
+      if (!Array.isArray(accounts)) continue;
+      const match = accounts.find(
+        (a): a is { platform: string; handle: string } =>
+          typeof a === "object" && a !== null &&
+          (a as { platform?: string }).platform === r.preferred_social &&
+          typeof (a as { handle?: string }).handle === "string" &&
+          (a as { handle?: string }).handle !== "",
+      );
+      if (match) names.set(r.id, match.handle);
+    } catch {
+      // malformed snapshot → no name
+    }
+  }
+  return names;
+}
 
 // PATCH /api/me — the opt-in prefs that live on the better-auth `user`
 // table (untracked by drizzle, hence the raw UPDATE). Body fields, all

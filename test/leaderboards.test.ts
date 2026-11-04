@@ -49,8 +49,31 @@ async function seedSubmission(userId: string | null, status: Submission["status"
 // (untracked by drizzle — same convention as forgeSession's raw inserts).
 async function setPrefs(
   userId: string,
-  prefs: { display_name?: string | null; show_on_leaderboard?: boolean; show_credit?: boolean },
+  prefs: {
+    display_name?: string | null;
+    show_on_leaderboard?: boolean;
+    show_credit?: boolean;
+    // What the board renders now: a Gravatar-verified handle via
+    // preferred_social + the gravatar_accounts snapshot (same shape
+    // refreshGravatarAccounts writes). null clears both.
+    public_name?: string | null;
+  },
 ) {
+  if (prefs.public_name !== undefined) {
+    const accounts = prefs.public_name
+      ? JSON.stringify([
+          {
+            platform: "instagram",
+            label: "Instagram",
+            handle: prefs.public_name,
+            url: `https://instagram.com/${prefs.public_name}`,
+          },
+        ])
+      : null;
+    await env.DB.prepare(`UPDATE "user" SET preferred_social = ?, gravatar_accounts = ? WHERE id = ?`)
+      .bind(prefs.public_name ? "instagram" : null, accounts, userId)
+      .run();
+  }
   if (prefs.display_name !== undefined) {
     await env.DB.prepare(`UPDATE "user" SET display_name = ? WHERE id = ?`)
       .bind(prefs.display_name, userId)
@@ -91,8 +114,8 @@ it("kind=checkins ranks users by check-in count with ranks and opt-in names", as
   const v3 = await seedVenue();
   const ali = await forgeSession("submitter");
   const siti = await forgeSession("submitter");
-  await setPrefs(ali.userId, { display_name: "Ali", show_on_leaderboard: true });
-  await setPrefs(siti.userId, { display_name: "Siti", show_on_leaderboard: true });
+  await setPrefs(ali.userId, { public_name: "Ali", show_on_leaderboard: true });
+  await setPrefs(siti.userId, { public_name: "Siti", show_on_leaderboard: true });
 
   await seedCheckins(ali.userId, [v1.id, v2.id, v3.id]);
   await seedCheckins(siti.userId, [v1.id]);
@@ -119,7 +142,7 @@ it("period windows gate by created_at: week excludes last month's rows", async (
   const v1 = await seedVenue("Tutong");
   const v2 = await seedVenue("Tutong");
   const u = await forgeSession("submitter");
-  await setPrefs(u.userId, { display_name: "Weekly", show_on_leaderboard: true });
+  await setPrefs(u.userId, { public_name: "Weekly", show_on_leaderboard: true });
   await seedCheckins(u.userId, [v1.id], new Date(Date.now() - 40 * DAY_MS)); // last month
   await seedCheckins(u.userId, [v2.id]); // today
 
@@ -138,7 +161,7 @@ it("area and venue_type filter counts through the venue join", async () => {
   const belaitStall = await seedVenue("Belait", "stall");
   const muaraResto = await seedVenue("Brunei-Muara", "restaurant");
   const u = await forgeSession("submitter");
-  await setPrefs(u.userId, { display_name: "Traveller", show_on_leaderboard: true });
+  await setPrefs(u.userId, { public_name: "Traveller", show_on_leaderboard: true });
   await seedCheckins(u.userId, [belaitStall.id, muaraResto.id]);
 
   const belait = await board("?kind=checkins&period=all&area=Belait");
@@ -151,6 +174,17 @@ it("area and venue_type filter counts through the venue join", async () => {
 
 // --- (d) Review Focus #5: opt-out renders "Anonymous" -------------------------
 
+it("a freeform display_name never renders — only verified socials name a row", async () => {
+  const venue = await seedVenue();
+  const u = await forgeSession("submitter");
+  await seedCheckins(u.userId, [venue.id]);
+  // display_name set but no preferred_social: unmoderatable freeform text
+  // must not reach the public board even for an opted-in user.
+  await setPrefs(u.userId, { display_name: "VulgarFreeform", show_on_leaderboard: true });
+  const b = await board("?kind=checkins&period=all");
+  expect(b.body.board.some((r) => r.name === "VulgarFreeform")).toBe(false);
+});
+
 it("an opt-out user ranked #1 shows \"Anonymous\"; their display_name never leaks; me keeps the real rank", async () => {
   // Temburong isolates the board from other tests' rows.
   const v1 = await seedVenue("Temburong");
@@ -159,8 +193,8 @@ it("an opt-out user ranked #1 shows \"Anonymous\"; their display_name never leak
   const other = await forgeSession("submitter");
   // Opted OUT (default false) but with a display_name set — the sentinel must
   // not appear anywhere in the response.
-  await setPrefs(top.userId, { display_name: "SecretNameXYZ", show_on_leaderboard: false });
-  await setPrefs(other.userId, { display_name: "Visible", show_on_leaderboard: true });
+  await setPrefs(top.userId, { public_name: "SecretNameXYZ", show_on_leaderboard: false });
+  await setPrefs(other.userId, { public_name: "Visible", show_on_leaderboard: true });
   await seedCheckins(top.userId, [v1.id, v2.id]);
   await seedCheckins(other.userId, [v1.id]);
 
@@ -181,8 +215,8 @@ it("kind=contributions counts approved submissions only; area filters via the pu
   const reviewer = await forgeSession("reviewer");
   const a = await forgeSession("submitter");
   const b = await forgeSession("submitter");
-  await setPrefs(a.userId, { display_name: "Chef", show_on_leaderboard: true });
-  await setPrefs(b.userId, { display_name: "Foodie", show_on_leaderboard: true });
+  await setPrefs(a.userId, { public_name: "Chef", show_on_leaderboard: true });
+  await setPrefs(b.userId, { public_name: "Foodie", show_on_leaderboard: true });
 
   const approvedBelait = await seedSubmission(a.userId, "approved");
   await seedSubmission(a.userId, "approved");
@@ -215,7 +249,7 @@ it("kind=verifications ranks votes", async () => {
   const v1 = await seedVenue();
   const v2 = await seedVenue();
   const u = await forgeSession("submitter");
-  await setPrefs(u.userId, { display_name: "Verifier", show_on_leaderboard: true });
+  await setPrefs(u.userId, { public_name: "Verifier", show_on_leaderboard: true });
   await db()
     .insert(verifications)
     .values([
@@ -266,7 +300,7 @@ it("PATCH /api/me sets prefs and flags; the board honours the opt-in gate", asyn
 
   // Board rows key off the name field — seed it directly (public-name
   // source changes in a later task; the opt-in gate is what this test pins).
-  await setPrefs(u.userId, { display_name: "Ali B" });
+  await setPrefs(u.userId, { public_name: "Ali B" });
   let b = await board("?kind=checkins&period=all");
   expect(b.body.board.some((r) => r.name === "Ali B" && r.count === 1)).toBe(true);
 
