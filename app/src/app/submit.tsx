@@ -172,13 +172,18 @@ function SubmitForm() {
     }
   }
 
-  // Miss-path handoff (spec §3): an unknown scan code switches to the
+  // Miss-path handoff (spec §3): unknown scan codes switch to the
   // product-photo form with the digits carried in provenance so a reviewer
-  // can match them against the photo.
-  function addPhotosForCode(code: string, venueName: string) {
+  // can match them against the photo. The tag always appends — a stale
+  // provenance draft must not swallow the digits.
+  function addPhotosForCode(codes: string[], venueName: string) {
     setMode("form");
     setSourceType("product_photo");
-    setProvenance((p) => p.trim() || `Product photo at ${venueName} — barcode ${code}`);
+    const tag =
+      codes.length === 1
+        ? `Barcode: ${codes[0]} — product photo at ${venueName}`
+        : `Barcodes: ${codes.join(", ")} — product photos at ${venueName}`;
+    setProvenance((p) => (p.trim() ? `${p.trim()}\n${tag}` : tag));
     setMessage(null);
   }
 
@@ -250,8 +255,9 @@ function SubmitForm() {
     <ScrollView className="flex-1 bg-neutral-50" contentContainerClassName="gap-4 p-4">
       <Text className="text-xl font-bold text-neutral-900">Submit a menu</Text>
       <Text className="text-sm leading-6 text-neutral-600">
-        Photograph a menu, product or barcode and we will extract the items for review. Submissions
-        are checked by a reviewer before they go live.
+        Photograph a menu, product or barcode and we will extract the items for review. Scans that
+        match a product database go live right away under a pending-verification badge; everything
+        else is checked by a reviewer first.
       </Text>
 
       {/* Mode tabs: the classic photo/file form vs the continuous-decode

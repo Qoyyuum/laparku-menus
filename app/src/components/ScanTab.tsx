@@ -93,8 +93,8 @@ interface PickedVenue {
 export function ScanTab({
   onAddPhotos,
 }: {
-  /** Hand an unknown code off to the parent's photo form (spec miss path). */
-  onAddPhotos?: (code: string, venueName: string) => void;
+  /** Hand unknown codes off to the parent's photo form (spec miss path). */
+  onAddPhotos?: (codes: string[], venueName: string) => void;
 }) {
   const [venue, setVenue] = useState<PickedVenue | null>(null);
   const [provenance, setProvenance] = useState("");
@@ -105,6 +105,7 @@ export function ScanTab({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ScanSubmitResult | null>(null);
+  const [nearAutoPicked, setNearAutoPicked] = useState(false);
 
   // Per-code re-decode throttle — a ref, not state: it's a write-mostly map
   // read inside the decode path and must never schedule renders.
@@ -245,8 +246,9 @@ export function ScanTab({
         ) : null}
         {result.queued > 0 ? (
           <Text className="text-sm leading-6 text-emerald-900">
-            {result.queued} item{result.queued === 1 ? "" : "s"} went to the normal review queue
-            (today's trusted-publish limit is 100 items).
+            {result.queued} item{result.queued === 1 ? "" : "s"} went to the normal review queue —
+            a reviewer will check them before they go live (over the daily limit or not verified by
+            a product source).
           </Text>
         ) : null}
         {result.stale_lookup > 0 ? (
@@ -276,9 +278,16 @@ export function ScanTab({
           {leftover > 0 && onAddPhotos ? (
             <Pressable
               className="rounded-lg border border-emerald-700 bg-white px-4 py-2"
-              onPress={() => onAddPhotos(unknown[0]!.code, venue?.name ?? "")}
+              onPress={() =>
+                onAddPhotos(
+                  unknown.map((c) => c.code),
+                  venue?.name ?? "",
+                )
+              }
             >
-              <Text className="text-sm font-semibold text-emerald-800">Photograph an unknown</Text>
+              <Text className="text-sm font-semibold text-emerald-800">
+                Photograph unknown{leftover === 1 ? "" : `s (${leftover})`}
+              </Text>
             </Pressable>
           ) : null}
         </View>
@@ -294,7 +303,15 @@ export function ScanTab({
           Scan packaged-product barcodes at a venue — every code in the batch attaches to the place
           you pick first.
         </Text>
-        <VenuePick onPick={pickVenue} />
+        <VenuePick
+          onPick={pickVenue}
+          // Auto-pick the closest suggestion only the first time — after a
+          // deliberate "Change", re-locating must show the list so another
+          // nearby venue can be tapped instead of looping back to the same
+          // one.
+          autoPickNearby={!nearAutoPicked}
+          onAutoPick={() => setNearAutoPicked(true)}
+        />
       </View>
     );
   }
@@ -435,7 +452,7 @@ export function ScanTab({
                       {onAddPhotos ? (
                         <Pressable
                           className="rounded-md bg-emerald-700 px-2.5 py-1"
-                          onPress={() => onAddPhotos(c.code, venue.name)}
+                          onPress={() => onAddPhotos([c.code], venue.name)}
                         >
                           <Text className="text-xs font-semibold text-white">Add photos</Text>
                         </Pressable>
@@ -539,7 +556,16 @@ function CaptureRow({ capture, onRemove }: { capture: Capture; onRemove: () => v
 // Venue pick (spec §4): "Use my location" → /api/venues/nearby → "Near you"
 // top-5 with distance; permission denied or empty → the venue search below
 // is the unchanged manual fallback. GPS is assistive, never enforced.
-function VenuePick({ onPick }: { onPick: (v: PickedVenue) => void }) {
+function VenuePick({
+  onPick,
+  autoPickNearby,
+  onAutoPick,
+}: {
+  onPick: (v: PickedVenue) => void;
+  /** Preselect the closest "Near you" hit (spec §4) — first locate only. */
+  autoPickNearby: boolean;
+  onAutoPick?: () => void;
+}) {
   const [nearby, setNearby] = useState<NearbyVenue[] | null>(null);
   const [locating, setLocating] = useState(false);
   const [locMsg, setLocMsg] = useState<string | null>(null);
@@ -561,7 +587,14 @@ function VenuePick({ onPick }: { onPick: (v: PickedVenue) => void }) {
       });
       const list = await nearbyVenues(pos.coords.latitude, pos.coords.longitude, NEARBY_LIMIT);
       setNearby(list);
-      if (list.length === 0) setLocMsg("No venues within ~500 m — search below.");
+      if (list.length === 0) {
+        setLocMsg("No venues within ~500 m — search below.");
+      } else if (autoPickNearby) {
+        // Spec §4: the closest suggestion is preselected — the user can
+        // still hit "Change" for another nearby venue or the search.
+        onAutoPick?.();
+        onPick(list[0]!);
+      }
     } catch {
       setLocMsg("Couldn't get your location — search for the venue below instead.");
     } finally {
