@@ -115,3 +115,108 @@ it("GET /api/me exposes theme, preferred_social, socials and a gravatar avatar_u
     `https://www.gravatar.com/avatar/${await sha256Hex(`${u.userId}@test.dev`)}?s=200&d=identicon`,
   );
 });
+
+// --- socials refresh ---------------------------------------------------------
+
+const GRAVATAR_PAYLOAD = {
+  verified_accounts: [
+    {
+      service_type: "instagram",
+      service_label: "Instagram",
+      service_icon: "i",
+      url: "https://instagram.com/fit.food/",
+      is_hidden: false,
+    },
+    {
+      service_type: "tiktok",
+      service_label: "TikTok",
+      service_icon: "i",
+      url: "https://tiktok.com/@fitfood",
+      is_hidden: false,
+    },
+  ],
+};
+
+function stubGravatar(email: string, opts: { fail?: boolean } = {}) {
+  const realFetch = globalThis.fetch;
+  return (async () => {
+    const sha = await sha256Hex(email);
+    globalThis.fetch = vi.fn(async (input: unknown) => {
+      if (opts.fail) throw new Error("gravatar down");
+      if (String(input) === `https://api.gravatar.com/v3/profiles/${sha}`) {
+        return new Response(JSON.stringify(GRAVATAR_PAYLOAD), { status: 200 });
+      }
+      return new Response("{}", { status: 404 });
+    }) as typeof fetch;
+    return () => {
+      globalThis.fetch = realFetch;
+    };
+  })();
+}
+
+it("POST /me/socials/refresh caches verified accounts; preferred_social validates against them", async () => {
+  const u = await forgeSession("submitter");
+  const prevKey = env.GRAVATAR_API_KEY;
+  env.GRAVATAR_API_KEY = "k";
+  const restore = await stubGravatar(`${u.userId}@test.dev`);
+  try {
+    const res = await SELF.fetch("https://x/api/me/socials/refresh", {
+      method: "POST",
+      headers: { cookie: u.cookie },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { socials: { platform: string }[] };
+    expect(body.socials.map((s) => s.platform)).toEqual(["instagram", "tiktok"]);
+
+    // A platform in the verified set is accepted; anything else 400s.
+    expect((await patchMe(u.cookie, { preferred_social: "instagram" })).status).toBe(200);
+    expect((await patchMe(u.cookie, { preferred_social: "myspace" })).status).toBe(400);
+    expect((await getMe(u.cookie)).preferred_social).toBe("instagram");
+  } finally {
+    restore();
+    env.GRAVATAR_API_KEY = prevKey || "";
+  }
+});
+
+it("refresh failures are not fatal: endpoint still 200s with the stale cache", async () => {
+  const u = await forgeSession("submitter");
+  // Pre-seed a snapshot so there's a "stale cache" to fall back to.
+  await env.DB.prepare(`UPDATE "user" SET gravatar_accounts = ? WHERE id = ?`)
+    .bind(JSON.stringify([{ platform: "x", label: "X", handle: "oldone", url: "https://x.com/oldone" }]), u.userId)
+    .run();
+  const prevKey = env.GRAVATAR_API_KEY;
+  env.GRAVATAR_API_KEY = "k";
+  const restore = await stubGravatar(`${u.userId}@test.dev`, { fail: true });
+  try {
+    const res = await SELF.fetch("https://x/api/me/socials/refresh", {
+      method: "POST",
+      headers: { cookie: u.cookie },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { socials: { handle: string }[]; error?: string };
+    expect(body.error).toBeTruthy();
+    expect(body.socials[0]?.handle).toBe("oldone");
+  } finally {
+    restore();
+    env.GRAVATAR_API_KEY = prevKey || "";
+  }
+});
+
+it("refresh is skipped when GRAVATAR_API_KEY is unset", async () => {
+  const u = await forgeSession("submitter");
+  const prevKey = env.GRAVATAR_API_KEY;
+  env.GRAVATAR_API_KEY = "";
+  const restore = await stubGravatar(`${u.userId}@test.dev`);
+  try {
+    const res = await SELF.fetch("https://x/api/me/socials/refresh", {
+      method: "POST",
+      headers: { cookie: u.cookie },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { socials: unknown[] };
+    expect(body.socials).toEqual([]);
+  } finally {
+    restore();
+    env.GRAVATAR_API_KEY = prevKey || "";
+  }
+});

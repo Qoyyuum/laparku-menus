@@ -80,4 +80,42 @@ meApi.get("/me", requireAuth(ME_ROLES), async (c) => {
   });
 });
 
+// POST /api/me/socials/refresh — "I just updated my gravatar" button. Forces
+// a snapshot refresh now, sharing refreshGravatarAccounts with GET /me's
+// stale-check. A failed fetch isn't fatal (stale cache returned with an
+// error flag); no key configured → returns the cache untouched.
+meApi.post("/me/socials/refresh", requireAuth(ME_ROLES), async (c) => {
+  const userId = c.get("user").id;
+  const db = getDb(c.env);
+  const cachedSocials = async (): Promise<VerifiedAccount[]> => {
+    const [row] = (await db.all(sql`
+      SELECT gravatar_accounts FROM "user" WHERE id = ${userId}
+    `)) as { gravatar_accounts: string | null }[];
+    try {
+      const parsed: unknown = JSON.parse(row?.gravatar_accounts ?? "[]");
+      return Array.isArray(parsed) ? (parsed as VerifiedAccount[]) : [];
+    } catch {
+      return [];
+    }
+  };
+  if (!c.env.GRAVATAR_API_KEY) {
+    return c.json({ socials: await cachedSocials() });
+  }
+  const [u] = (await db.all(sql`
+    SELECT email, preferred_social FROM "user" WHERE id = ${userId}
+  `)) as { email: string; preferred_social: string | null }[];
+  if (!u?.email) return c.json({ socials: [] });
+  try {
+    const socials = await refreshGravatarAccounts(c.env, userId, u.email);
+    // A preferred platform that vanished from the new snapshot is cleared —
+    // the board must never render a handle the user no longer verifies.
+    if (u.preferred_social && !socials.some((s) => s.platform === u.preferred_social)) {
+      await db.run(sql`UPDATE "user" SET preferred_social = NULL WHERE id = ${userId}`);
+    }
+    return c.json({ socials });
+  } catch {
+    return c.json({ socials: await cachedSocials(), error: "gravatar fetch failed" });
+  }
+});
+
 export default meApi;
