@@ -2,7 +2,14 @@ import { env, SELF } from "cloudflare:test";
 import { and, eq, sql } from "drizzle-orm";
 import { expect, it } from "vitest";
 import { getDb } from "../src/db/client";
-import { food_items, product_lookup_cache, submissions, venues } from "../src/db/schema";
+import {
+  food_items,
+  product_lookup_cache,
+  submissions,
+  venue_revisions,
+  venues,
+} from "../src/db/schema";
+import { normalizeBarcode } from "../src/lib/product-lookup";
 import { forgeSession } from "./helpers/auth";
 
 const db = () => getDb(env);
@@ -39,16 +46,18 @@ interface ScanBody {
 }
 
 // POSTs the batch. Unless seedCache:false, every item's barcode is first
-// seeded into product_lookup_cache as a found OFF hit — mirroring the real
-// flow, where the app only submits items its /api/products/lookup resolved.
+// seeded into product_lookup_cache (under the canonical code, like the
+// real chain) as a found OFF hit — mirroring the real flow, where the app
+// only submits items its /api/products/lookup resolved.
 async function scan(body: ScanBody, cookie?: string, { seedCache = true } = {}) {
   if (seedCache && Array.isArray(body?.items)) {
     for (const it of body.items) {
       if (!it?.barcode) continue;
+      const code = normalizeBarcode(String(it.barcode).trim())?.code ?? String(it.barcode).trim();
       await db()
         .insert(product_lookup_cache)
         .values({
-          code: String(it.barcode).trim(),
+          code,
           merged_payload: { name: it.name ?? "?" },
           sources: [{ provider: "openfoodfacts" }],
           found: true,
@@ -233,6 +242,80 @@ it("barcode normalization: whitespace variants dedup instead of duplicating", as
     .where(eq(food_items.venue_id, venue.id));
   expect(rows).toHaveLength(1);
   expect(rows[0]!.barcode).toBe(item.barcode);
+});
+
+it("a GTIN-14 scan of an already-live UPC-A dedups — canonical storage, one row", async () => {
+  const venue = await seedVenue();
+  const { cookie } = await forgeSession("submitter");
+  // UPC-A "042100005264" ↔ GTIN-14 "0042100005264" — the same product.
+  const upca = scanItem({ barcode: "042100005264" });
+  await scan({ venue_id: venue.id, provenance: "s1", items: [upca] }, cookie);
+
+  const res = await scan(
+    { venue_id: venue.id, provenance: "s2", items: [scanItem({ barcode: "0042100005264" })] },
+    cookie,
+  );
+  const body = (await res.json()) as ScanResult;
+  expect(body.stale_lookup).toBe(1);
+  expect(body.published).toBe(0);
+
+  const rows = await db().select().from(food_items).where(eq(food_items.venue_id, venue.id));
+  expect(rows).toHaveLength(1);
+  expect(rows[0]!.barcode).toBe("042100005264"); // canonical form stored
+});
+
+it("barcode_source + off_barcode come from the cache row's providers, not client tags", async () => {
+  const venue = await seedVenue();
+  const { cookie } = await forgeSession("submitter");
+  const item = scanItem({ barcode: "042100006666", source_tags: [" madeup-store "] });
+  // The chain saw this code through OFF + ean-search — the tag claim is noise.
+  await db().insert(product_lookup_cache).values({
+    code: item.barcode,
+    merged_payload: { name: item.name },
+    sources: [{ provider: "openfoodfacts" }, { provider: "eansearch" }],
+    found: true,
+    fetched_at: new Date(),
+  });
+
+  const res = await scan({ venue_id: venue.id, provenance: "s", items: [item] }, cookie);
+  const body = (await res.json()) as ScanResult;
+  expect(body.published).toBe(1);
+
+  const [row] = await db()
+    .select()
+    .from(food_items)
+    .where(and(eq(food_items.venue_id, venue.id), eq(food_items.barcode, item.barcode)));
+  expect(row!.barcode_source).toEqual(["openfoodfacts", "eansearch"]);
+  // OFF-family provider in the cache → the OFF linkage field is wired.
+  expect(row!.off_barcode).toBe(item.barcode);
+});
+
+// --- revision audit: trusted publishes reach venue_revisions -------------------
+
+it("a trusted publish writes a 'system' venue_revision; area-filtered boards count it", async () => {
+  const venue = await seedVenue(); // Brunei-Muara
+  const { cookie } = await forgeSession("submitter");
+  const res = await scan({ venue_id: venue.id, provenance: "s", items: [scanItem()] }, cookie);
+  const body = (await res.json()) as ScanResult;
+  expect(body.submission_id).toBeTruthy();
+
+  const [rev] = await db()
+    .select()
+    .from(venue_revisions)
+    .where(eq(venue_revisions.submission_id, body.submission_id!));
+  expect(rev).toBeTruthy();
+  expect(rev!.venue_id).toBe(venue.id);
+  expect(rev!.reviewer_id).toBe("system");
+
+  // The contributions board joins through venue_revisions for area
+  // filtering — without the row this publish silently dropped out.
+  const board = await SELF.fetch(
+    "https://x/api/leaderboards?kind=contributions&period=all&area=Brunei-Muara",
+    { headers: { cookie } },
+  );
+  expect(board.status).toBe(200);
+  const lb = (await board.json()) as { me: { rank: number; count: number } | null };
+  expect(lb.me?.count).toBe(1);
 });
 
 // --- Review Focus #3: 100 items/user/day cap → overflow pending_review ---------

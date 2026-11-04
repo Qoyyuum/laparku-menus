@@ -28,8 +28,8 @@ const scanItemSchema = z.object({
   // Which lookup providers supplied this item's data. The key is required;
   // [] parses fine but can never pass the trusted-publish gate (a provider
   // must have actually seen the code — see trustedPublishScan), so such
-  // items queue for review rather than publish.
-  source_tags: z.array(z.string().min(1).max(64)).max(20),
+  // items queue for review rather than publish. Tags trim at intake.
+  source_tags: z.array(z.string().trim().min(1).max(64)).max(20),
 });
 const scanSchema = z.object({
   venue_id: z.string().min(1),

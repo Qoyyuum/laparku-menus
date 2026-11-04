@@ -1,10 +1,18 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
-import { food_items, product_lookup_cache, submissions, submitters, venues, type Submitter } from "../db/schema";
+import {
+  food_items,
+  product_lookup_cache,
+  submissions,
+  submitters,
+  venues,
+  type Submitter,
+} from "../db/schema";
 import { resolveSubmitter } from "../routes/submissions";
 import { recordVerification } from "./freshness";
 import { normalizeBarcode } from "./product-lookup";
 import { PublishError } from "./publish";
+import { recordRevision } from "./revisions";
 
 // Blast-radius cap for the trusted path (spec §5, plan Global Constraints):
 // at most this many items per user per UTC day may go live without review.
@@ -44,6 +52,25 @@ function utcDayStart(now: Date): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 }
 
+// Canonical storage form for a scanned code — same normalization the
+// lookup chain applies to its cache keys, so dedup, storage and the merge
+// matcher all compare one form (a GTIN-14 scan and a UPC-A scan of the
+// same product are ONE row). Non-digit codes (Code 128/QR payloads) pass
+// through trimmed.
+function canonicalBarcode(barcode: string): string {
+  return normalizeBarcode(barcode)?.code ?? barcode;
+}
+
+// Stored-barcode forms a pre-canonicalization row might carry: the code
+// itself plus leading-zero GTIN paddings. Used only to *find* candidate
+// duplicates — the comparison itself is done canonically in JS below.
+function storedForms(canonical: string): string[] {
+  const forms = [canonical];
+  if (canonical.length < 13) forms.push(canonical.padStart(13, "0"));
+  if (canonical.length < 14) forms.push(canonical.padStart(14, "0"));
+  return forms;
+}
+
 async function bumpSubmitterCounts(db: Db, submitter: Submitter, filed: number, approved: number) {
   await db
     .update(submitters)
@@ -68,19 +95,23 @@ export async function trustedPublishScan(
   input: { userId: string; venueId: string; provenance: string; items: ScanItem[] },
 ): Promise<ScanPublishResult> {
   const { userId, venueId, provenance } = input;
-  // Normalize barcodes once at intake — the dedup set, the lookup-cache
-  // check, the merge matcher and the stored column all compare the same
-  // form, so " 123" and "123" can't bypass dedup into duplicate rows.
-  const items = input.items.map((i) => ({ ...i, barcode: i.barcode.trim() }));
+  // Normalize barcodes once at intake (canonical form — see
+  // canonicalBarcode) — the dedup set, the lookup-cache check, the merge
+  // matcher and the stored column all compare the same form, so " 123",
+  // "123" and a GTIN-14 pad can't bypass dedup into duplicate rows.
+  const items = input.items.map((i) => ({ ...i, barcode: canonicalBarcode(i.barcode.trim()) }));
   const now = new Date();
   const dayStart = utcDayStart(now);
 
   // Freshness dedup: barcodes already is_current at THIS venue re-verify
   // rather than duplicate (spec §7). The same barcode at a different venue
   // is a different menu row — correct — so the lookup is venue-scoped.
-  const barcodes = [...new Set(items.map((i) => i.barcode))];
-  const current = new Set<string>(); // live barcodes at this venue
-  for (let off = 0; off < barcodes.length; off += 90) {
+  // Existing rows may hold any stored form (canonical or a GTIN pad from
+  // before canonical storage), so the fetch widens to those forms and the
+  // comparison re-canonicalizes each row.
+  const forms = [...new Set(items.flatMap((i) => storedForms(i.barcode)))];
+  const current = new Set<string>(); // live barcodes at this venue, canonical
+  for (let off = 0; off < forms.length; off += 90) {
     const rows = await db
       .select({ barcode: food_items.barcode })
       .from(food_items)
@@ -89,10 +120,10 @@ export async function trustedPublishScan(
           eq(food_items.venue_id, venueId),
           eq(food_items.is_current, true),
           eq(food_items.status, "published"),
-          inArray(food_items.barcode, barcodes.slice(off, off + 90)),
+          inArray(food_items.barcode, forms.slice(off, off + 90)),
         ),
       );
-    for (const r of rows) if (r.barcode) current.add(r.barcode);
+    for (const r of rows) if (r.barcode) current.add(canonicalBarcode(r.barcode.trim()));
   }
 
   const candidates: ScanItem[] = [];
@@ -112,18 +143,19 @@ export async function trustedPublishScan(
   // vouched for the code — it must declare ≥1 source tag AND the lookup
   // chain must have a `found` cache row for the barcode. Declaring tags
   // alone isn't enough (a client could claim "openfoodfacts" for
-  // anything); the cache row is server-side proof the chain saw the code.
-  // The check runs against the code's normalized candidates (canonical
-  // form + UPC-E expansion) — a GTIN-14 scan verifies against the UPC-A
-  // the chain cached. Items failing either check aren't rejected — they
-  // queue for review.
+  // anything); the cache row is server-side proof the chain saw the code,
+  // and its `sources` — not the client's tags — become the item's stored
+  // provenance. The check runs against the code's normalized candidates
+  // (canonical form + UPC-E expansion). Items failing either check aren't
+  // rejected — they queue for review.
   const cacheKeysOf = (barcode: string): string[] =>
     normalizeBarcode(barcode)?.candidates ?? [barcode];
-  const foundCodes = new Set<string>();
+  // cache code → provider names that recognized it.
+  const foundProviders = new Map<string, string[]>();
   const allKeys = [...new Set(candidates.flatMap((i) => cacheKeysOf(i.barcode)))];
   for (let off = 0; off < allKeys.length; off += 90) {
     const rows = await db
-      .select({ code: product_lookup_cache.code })
+      .select({ code: product_lookup_cache.code, sources: product_lookup_cache.sources })
       .from(product_lookup_cache)
       .where(
         and(
@@ -131,14 +163,18 @@ export async function trustedPublishScan(
           inArray(product_lookup_cache.code, allKeys.slice(off, off + 90)),
         ),
       );
-    for (const r of rows) foundCodes.add(r.code);
+    for (const r of rows) foundProviders.set(r.code, (r.sources ?? []).map((s) => s.provider));
   }
 
-  const publishable: ScanItem[] = [];
+  const publishable: { item: ScanItem; providers: string[] }[] = [];
   const overflow: ScanItem[] = [];
   for (const item of candidates) {
-    const verified = item.source_tags.length > 0 && cacheKeysOf(item.barcode).some((k) => foundCodes.has(k));
-    if (verified) publishable.push(item);
+    // Providers across every candidate key that hit — e.g. a code cached
+    // under both its canonical and expanded forms merges provenance.
+    const providers = [
+      ...new Set(cacheKeysOf(item.barcode).flatMap((k) => foundProviders.get(k) ?? [])),
+    ];
+    if (item.source_tags.length > 0 && providers.length > 0) publishable.push({ item, providers });
     else overflow.push(item);
   }
 
@@ -161,13 +197,14 @@ export async function trustedPublishScan(
       image_keys: [],
       auto_flags: [],
       status: "trusted_published",
-      scan_barcode: publishable[0]!.barcode,
+      scan_barcode: publishable[0]!.item.barcode,
       publish_mode: "trusted",
     });
 
-    for (const [i, item] of publishable.entries()) {
+    for (const [i, entry] of publishable.entries()) {
+      const { item, providers } = entry;
       const id = crypto.randomUUID();
-      const offHit = item.source_tags.some((t) => OFF_FAMILY.has(t));
+      const offHit = providers.some((t) => OFF_FAMILY.has(t));
       // Atomic per-item cap — the same counted-insert pattern as check-ins
       // (INSERT ... SELECT ... WHERE (count) < cap). Counts food_items rows
       // created today whose source submission is a trusted publish by this
@@ -184,7 +221,7 @@ export async function trustedPublishScan(
           ${item.barcode}, ${item.package_size ?? null},
           ${item.nutrition_estimate ? JSON.stringify(item.nutrition_estimate) : null},
           ${offHit ? item.barcode : null}, ${trustedId}, '[]',
-          1, 1, ${JSON.stringify(item.source_tags)}, 'published',
+          1, 1, ${JSON.stringify(providers)}, 'published',
           ${now.getTime()}, ${now.getTime()}
         WHERE (
           SELECT count(*) FROM food_items fi
@@ -197,7 +234,7 @@ export async function trustedPublishScan(
       if (!inserted) {
         // Budget spent — the count only grows, so this item and every
         // later one fall back to the normal review queue.
-        overflow.push(item, ...publishable.slice(i + 1));
+        overflow.push(item, ...publishable.slice(i + 1).map((e) => e.item));
         break;
       }
       published += 1;
@@ -246,6 +283,18 @@ export async function trustedPublishScan(
       .update(venues)
       .set({ last_verified_at: now, is_stub: false })
       .where(eq(venues.id, venueId));
+    // Audit row, same shape publishSubmission writes — "system" stands in
+    // for a human reviewer: the trusted path published this, honestly
+    // recorded. Without it the submission falls out of every read that
+    // reaches venues through venue_revisions (area/venue_type-filtered
+    // contribution boards, pioneer badges). mode "merge" — the batch added
+    // items without superseding anything.
+    await recordRevision(db, {
+      venueId,
+      submissionId: trustedId!,
+      reviewerId: "system",
+      mode: "merge",
+    });
   }
   if (stale > 0) {
     try {
