@@ -9,7 +9,7 @@
 import { spawnSync } from "node:child_process";
 
 const ROLES = ["admin", "reviewer", "submitter"] as const;
-const DB_NAME = "laparku-menus";
+const DB_NAME = "laparku-menus-db";
 
 function usage(msg?: string): never {
   if (msg) console.error(`error: ${msg}`);
