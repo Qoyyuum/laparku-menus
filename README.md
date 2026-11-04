@@ -84,6 +84,11 @@ Set via `wrangler secret put <NAME>` — never commit them:
 - `TURNSTILE_SECRET_KEY` — Cloudflare Turnstile; pair with `TURNSTILE_SITE_KEY` in
   `wrangler.toml` `[vars]` and `EXPO_PUBLIC_TURNSTILE_SITEKEY` for the app build.
   When unset, server-side Turnstile checks are skipped (fine for dev).
+- `GRAVATAR_API_KEY` — optional. Bearer key for Gravatar's v3 profile API
+  (`api.gravatar.com/v3/profiles/<sha256(email)>`); raises the
+  `verified_accounts` cap past 4. When unset, verified-account lookups are
+  skipped and profiles just render empty socials (fine for dev — keeps tests
+  and local runs offline-clean).
 
 Email needs no secret — magic links + notifications send through the
 `send_email` binding (`env.EMAIL`). Before the first real send, onboard the

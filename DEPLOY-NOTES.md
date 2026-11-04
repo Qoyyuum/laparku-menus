@@ -40,6 +40,7 @@ npx wrangler pages deploy landing --project-name=laparku
 |---|---|
 | `BETTER_AUTH_SECRET` | ✅ set (generated, 2× UUID) |
 | `TURNSTILE_SECRET_KEY` | ❌ not set — server-side Turnstile checks are skipped while unset |
+| `GRAVATAR_API_KEY` | ❌ not set — profiles skip verified-social lookups while unset (optional upstream; raises verified_accounts cap past 4) |
 
 `TURNSTILE_SITE_KEY` in `[vars]` is a placeholder (`TODO-create-turnstile-widget`).
 
@@ -109,6 +110,12 @@ Empty result sets are expected — fresh database, no approved submissions yet.
 4. **Optional: promote first admin/reviewer** — `scripts/promote-admin.ts`
    once a real user signs up.
 5. **Optional: EAS Build** for native store distribution (deferred).
+6. **Migration 0004 + optional Gravatar key** — `npx wrangler d1 migrations
+   apply laparku-menus-db --remote` applies `0004_passkeys_profiles` (passkey
+   table; user theme/preferred_social/gravatar cache columns). Set
+   `GRAVATAR_API_KEY` via `wrangler secret put` to enable verified-social
+   lookups for contributor profiles; without it socials stay empty and the
+   leaderboard renders "Anonymous" for everyone.
 
 ## App-side verification — Scans tab (phase 3, Task 5)
 
