@@ -9,11 +9,14 @@ import { authClient, isReviewer } from "../auth";
 export function SignInGate({
   children,
   title = "Reviewer sign-in",
+  subtitle,
   callbackURL = "/admin",
   requireReviewer = true,
 }: {
   children: ReactNode;
   title?: string;
+  // One-line "why sign in" under the title — e.g. what the account unlocks.
+  subtitle?: string;
   callbackURL?: string;
   requireReviewer?: boolean;
 }) {
@@ -36,6 +39,9 @@ export function SignInGate({
       <View className="flex-1 justify-center bg-neutral-50 p-4">
         <View className="mx-auto w-full max-w-sm gap-3 rounded-xl border border-neutral-200 bg-white p-4">
           <Text className="text-lg font-bold text-neutral-900">{title}</Text>
+          {subtitle && !sent ? (
+            <Text className="text-sm leading-5 text-neutral-600">{subtitle}</Text>
+          ) : null}
           {sent ? (
             <Text className="text-sm leading-6 text-neutral-600">
               Check your email — we sent a sign-in link to {email}. Open it on this device to

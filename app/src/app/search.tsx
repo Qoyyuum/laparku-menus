@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, ScrollView, Text, View } from "react-native";
 import { apiFetch, type FoodItem, type SearchResult, type Venue } from "../api";
+import { ContributeBanner } from "../components/ContributeBanner";
 import { FilterBar, type FilterKey, type Filters } from "../components/FilterBar";
 import { ItemCard } from "../components/ItemCard";
 import { SearchBar } from "../components/SearchBar";
@@ -55,6 +56,8 @@ export default function SearchScreen() {
         filters={filters}
         onChange={(key: FilterKey, value) => setFilters((f) => ({ ...f, [key]: value }))}
       />
+
+      <ContributeBanner />
 
       {loading ? <ActivityIndicator color="#047857" /> : null}
       {error ? <Text className="text-sm text-red-600">{error}</Text> : null}

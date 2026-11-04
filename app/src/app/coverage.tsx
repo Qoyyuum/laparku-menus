@@ -87,7 +87,7 @@ export default function CoverageScreen() {
           {stubs.map((v) => (
             <View
               key={v.id}
-              className="flex-row items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2"
+              className="flex-row items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2"
             >
               <View className="flex-1">
                 <Text className="text-base font-medium text-neutral-900" numberOfLines={1}>
@@ -96,8 +96,11 @@ export default function CoverageScreen() {
                 <Text className="text-xs text-neutral-600">
                   {v.type} · {v.area}
                 </Text>
+                <Text className="text-xs font-semibold text-amber-700">⚑ menu needed</Text>
               </View>
-              <Text className="text-xs font-semibold text-amber-700">⚑ menu needed</Text>
+              <Link href="/submit">
+                <Text className="text-xs font-semibold text-emerald-700">Submit menu →</Text>
+              </Link>
             </View>
           ))}
           {!loading && stubs.length === 0 ? (
@@ -114,12 +117,20 @@ export default function CoverageScreen() {
         </Text>
         <View className="gap-2">
           {requests.map((r) => (
-            <View key={r.id} className="rounded-lg border border-neutral-200 bg-white px-3 py-2">
-              <Text className="text-base font-medium text-neutral-900" numberOfLines={1}>
-                {r.venue_name ?? r.free_text_name ?? "—"}
-              </Text>
-              <Text className="text-xs text-neutral-600">{r.area}</Text>
-              {r.note ? <Text className="mt-1 text-xs italic text-neutral-500">“{r.note}”</Text> : null}
+            <View
+              key={r.id}
+              className="flex-row items-center justify-between gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2"
+            >
+              <View className="flex-1">
+                <Text className="text-base font-medium text-neutral-900" numberOfLines={1}>
+                  {r.venue_name ?? r.free_text_name ?? "—"}
+                </Text>
+                <Text className="text-xs text-neutral-600">{r.area}</Text>
+                {r.note ? <Text className="mt-1 text-xs italic text-neutral-500">“{r.note}”</Text> : null}
+              </View>
+              <Link href="/submit">
+                <Text className="text-xs font-semibold text-emerald-700">Capture this →</Text>
+              </Link>
             </View>
           ))}
           {!loading && requests.length === 0 ? (

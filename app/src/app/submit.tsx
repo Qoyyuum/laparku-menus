@@ -34,7 +34,12 @@ interface PickedFile {
 // session; any authenticated role may submit (not just reviewers).
 export default function SubmitScreen() {
   return (
-    <SignInGate title="Sign in to submit a menu" callbackURL="/submit" requireReviewer={false}>
+    <SignInGate
+      title="Sign in to submit a menu"
+      subtitle="Sign in to file submissions and earn credit and badges."
+      callbackURL="/submit"
+      requireReviewer={false}
+    >
       <SubmitForm />
     </SignInGate>
   );
