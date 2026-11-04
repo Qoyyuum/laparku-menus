@@ -84,8 +84,9 @@ export interface FoodItem {
   // True on trusted-published scan items until a reviewer verifies —
   // the app renders the "recently scanned" badge off this.
   pending_verification: boolean;
-  // Contributor credit (Task 7): the sourcing submitter's display_name —
-  // present only when that user opted in via show_credit; absent otherwise.
+  // Contributor credit (Task 7): the sourcing submitter's verified social
+  // handle (preferred_social) — present only when that user opted in via
+  // show_credit; absent otherwise. Freeform names never ride this field.
   contributed_by?: string;
 }
 
@@ -206,7 +207,7 @@ export type LeaderboardPeriod = (typeof LEADERBOARD_PERIODS)[number];
 
 export interface LeaderboardRow {
   rank: number;
-  // `display_name` for opted-in users, "Anonymous" otherwise.
+  // Verified social handle for opted-in users, "Anonymous" otherwise.
   name: string;
   count: number;
   // Highest-tier earned badge key — opted-in rows only, null otherwise.

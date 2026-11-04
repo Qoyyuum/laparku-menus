@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { getDb } from "../db/client";
 import type { Env } from "../env";
-import { MAX_FILE_BYTES, sniffMagic, SNIFFED_MIME } from "../lib/files";
+import { sniffMagic, SNIFFED_MIME } from "../lib/files";
 import { gravatarUrl } from "../lib/gravatar";
 import { requireAuth, type AuthVariables } from "../middleware/auth";
 

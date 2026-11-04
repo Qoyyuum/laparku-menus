@@ -12,7 +12,7 @@ import {
   Text,
   View,
 } from "react-native";
-import { API_BASE, type Badge, type MeProfile, type ThemePref, type VerifiedAccount } from "../api";
+import { AUTH_ORIGIN, type Badge, type MeProfile, type ThemePref, type VerifiedAccount } from "../api";
 import { adminFetch, authClient } from "../auth";
 import { SignInGate } from "../components/SignInGate";
 import { useTheme } from "../theme";
@@ -183,7 +183,7 @@ async function assetBytes(asset: ImagePicker.ImagePickerAsset): Promise<Uint8Arr
 function AvatarCard({ me, onChanged }: { me: MeProfile; onChanged: (url: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const uri = me.avatar_url.startsWith("/") ? `${API_BASE}${me.avatar_url}` : me.avatar_url;
+  const uri = me.avatar_url.startsWith("/") ? `${AUTH_ORIGIN}${me.avatar_url}` : me.avatar_url;
   const uploaded = me.avatar_url.startsWith("/api/avatar/");
 
   async function upload() {

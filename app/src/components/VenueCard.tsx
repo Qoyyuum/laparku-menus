@@ -24,7 +24,7 @@ export function VenueCard({ venue }: { venue: Venue }) {
       }}
       asChild
     >
-      <Pressable className="gap-1.5 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 p-4 active:bg-neutral-50 dark:bg-neutral-900">
+      <Pressable className="gap-1.5 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 p-4 active:bg-neutral-50 dark:active:bg-neutral-900">
         <View className="flex-row items-start justify-between gap-2">
           <Text className="flex-1 text-base font-semibold text-neutral-900 dark:text-neutral-100">{venue.name}</Text>
           <HalalBadge status={venue.halal_status} />

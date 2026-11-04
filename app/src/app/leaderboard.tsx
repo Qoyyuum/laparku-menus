@@ -171,11 +171,12 @@ function PickerChip({ label, active, onPress }: { label: string; active: boolean
   );
 }
 
-// The opt-in editor for the leaderboard prefs (PATCH /api/me): a display
-// name plus the show_on_leaderboard toggle. Names only render for opted-in
-// users — the default is "Anonymous".
+// The opt-in editor for the leaderboard prefs (PATCH /api/me): just the
+// show_on_leaderboard toggle. The public name is the user's preferred
+// Gravatar-verified social handle (picked on the Profile screen) — freeform
+// display names are gone. Everything without a verified handle renders
+// "Anonymous".
 function OptInCard({ onSaved }: { onSaved: () => void }) {
-  const [name, setName] = useState("");
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -186,10 +187,9 @@ function OptInCard({ onSaved }: { onSaved: () => void }) {
   // when signed in, so the request is authorized.
   useEffect(() => {
     let cancelled = false;
-    authedFetch<{ display_name: string | null; show_on_leaderboard: boolean }>("/me")
+    authedFetch<{ show_on_leaderboard: boolean }>("/me")
       .then((m) => {
         if (cancelled) return;
-        setName(m.display_name ?? "");
         setShow(m.show_on_leaderboard);
       })
       .catch(() => {});
@@ -205,7 +205,7 @@ function OptInCard({ onSaved }: { onSaved: () => void }) {
     try {
       await authedFetch("/me", {
         method: "PATCH",
-        body: JSON.stringify({ display_name: name.trim() || null, show_on_leaderboard: show }),
+        body: JSON.stringify({ show_on_leaderboard: show }),
       });
       setMessage("Saved.");
       onSaved();
@@ -220,24 +220,18 @@ function OptInCard({ onSaved }: { onSaved: () => void }) {
     <View className="gap-2 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 p-4">
       <Text className="text-base font-bold text-neutral-900 dark:text-neutral-100">Your display settings</Text>
       <Text className="text-sm leading-6 text-neutral-600 dark:text-neutral-300">
-        Boards show “Anonymous” unless you opt in with a display name.
+        Boards show “Anonymous” unless you opt in — then they show the verified
+        social handle you picked under Profile → Social accounts.
       </Text>
-      <TextInput
-        className="rounded-lg border border-neutral-300 dark:border-neutral-600 px-3 py-2 text-base"
-        placeholder="Display name (e.g. Menu Hunter)"
-        maxLength={80}
-        value={name}
-        onChangeText={setName}
-      />
       <View className="flex-row items-center gap-2">
         <Switch value={show} onValueChange={setShow} />
-        <Text className="text-sm text-neutral-800 dark:text-neutral-100">Show my name on leaderboards</Text>
+        <Text className="text-sm text-neutral-800 dark:text-neutral-100">Show my social handle on leaderboards</Text>
       </View>
       {error ? <Text className="text-sm text-red-600">{error}</Text> : null}
       {message ? <Text className="text-sm font-medium text-emerald-700">{message}</Text> : null}
       <Pressable
         className="items-center rounded-lg bg-emerald-700 px-4 py-2.5 disabled:opacity-50"
-        disabled={busy || (show && name.trim() === "")}
+        disabled={busy}
         onPress={save}
       >
         <Text className="text-base font-semibold text-white">{busy ? "Saving…" : "Save"}</Text>

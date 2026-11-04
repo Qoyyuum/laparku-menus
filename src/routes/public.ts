@@ -4,6 +4,7 @@ import { getDb, type Db } from "../db/client";
 import { AREAS, food_items, HALAL_STATUSES, ITEM_TYPES, venues, VENUE_TYPES, type FoodItem } from "../db/schema";
 import type { Env } from "../env";
 import { staleMonths, withFreshness } from "../lib/freshness";
+import { preferredHandle } from "../lib/gravatar";
 
 // Cap rows returned by a single public request.
 const LIMIT = 100;
@@ -98,13 +99,14 @@ export async function listVenueItems(env: Env, venueId: string) {
 // Task 7 (rewards): per-item contributor credit. Each item traces to the
 // submission it was published from via source_submission_id; the
 // submission's user can opt into public credit (user.show_credit) and their
-// display_name then rides the item payload as `contributed_by`. The names
-// resolve in ONE batch query for the whole result set — never a per-item
-// N+1 — keyed by submission id so repeated sources look up once. `user` is
-// the untracked better-auth table, so the join is raw SQL (same convention
-// as leaderboards.ts). Opt-out users, opted-in-but-nameless rows, anonymous
-// (user-less) submissions and items with no source all carry no
-// contributed_by key — an opted-out display_name never leaves the DB.
+// preferred Gravatar-verified social handle then rides the item payload as
+// `contributed_by`. The names resolve in ONE batch query for the whole
+// result set — never a per-item N+1 — keyed by submission id so repeated
+// sources look up once. `user` is the untracked better-auth table, so the
+// join is raw SQL (same convention as leaderboards.ts). Opt-out users,
+// opted-in-but-nameless rows (no verified handle), anonymous (user-less)
+// submissions and items with no source all carry no contributed_by key —
+// and freeform display_name never leaves the DB on this surface.
 async function withContribCredit(
   db: Db,
   items: FoodItem[],
@@ -117,15 +119,17 @@ async function withContribCredit(
   // IN clause past D1's ~100 bound-param cap.
   for (let off = 0; off < subIds.length; off += 90) {
     const rows = (await db.all(sql`
-      SELECT s.id AS sid, u.display_name AS name
+      SELECT s.id AS sid, u.preferred_social AS preferred_social, u.gravatar_accounts AS gravatar_accounts
       FROM submissions AS s
       JOIN "user" AS u ON u.id = s.user_id
       WHERE ${inArray(sql`s.id`, subIds.slice(off, off + 90))}
         AND u.show_credit = 1
-        AND u.display_name IS NOT NULL
-        AND u.display_name <> ''
-    `)) as { sid: string; name: string }[];
-    for (const r of rows) credit.set(String(r.sid), String(r.name));
+        AND u.preferred_social IS NOT NULL
+    `)) as { sid: string; preferred_social: string | null; gravatar_accounts: string | null }[];
+    for (const r of rows) {
+      const handle = preferredHandle(r.gravatar_accounts, r.preferred_social);
+      if (handle) credit.set(String(r.sid), handle);
+    }
   }
   return items.map((i) => {
     const name = i.source_submission_id ? credit.get(i.source_submission_id) : undefined;

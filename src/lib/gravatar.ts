@@ -69,6 +69,32 @@ export async function fetchVerifiedAccounts(env: Env, email: string): Promise<Ve
     }));
 }
 
+// The public name for a user row: the handle of their preferred_social,
+// resolved off the cached snapshot. Missing pick, missing/malformed
+// snapshot, or a platform absent from the snapshot → null (caller renders
+// "Anonymous"/no credit). Single place the snapshot shape is trusted —
+// leaderboards and contributed_by share it.
+export function preferredHandle(
+  gravatarAccountsJson: string | null | undefined,
+  preferredSocial: string | null | undefined,
+): string | null {
+  if (!preferredSocial || !gravatarAccountsJson) return null;
+  try {
+    const accounts: unknown = JSON.parse(gravatarAccountsJson);
+    if (!Array.isArray(accounts)) return null;
+    const match = accounts.find(
+      (a): a is { platform: string; handle: string } =>
+        typeof a === "object" && a !== null &&
+        (a as { platform?: string }).platform === preferredSocial &&
+        typeof (a as { handle?: string }).handle === "string" &&
+        (a as { handle?: string }).handle !== "",
+    );
+    return match?.handle ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // Refresh the cached snapshot on the user row. Always stamps
 // gravatar_fetched_at — even on failure — so a Gravatar outage doesn't
 // make every GET /api/me pay for a doomed request.

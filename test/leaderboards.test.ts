@@ -185,6 +185,34 @@ it("a freeform display_name never renders — only verified socials name a row",
   expect(b.body.board.some((r) => r.name === "VulgarFreeform")).toBe(false);
 });
 
+it("malformed gravatar_accounts JSON and absent-platform picks render Anonymous, never 500", async () => {
+  const venue = await seedVenue();
+  const broken = await forgeSession("submitter");
+  const ghost = await forgeSession("submitter");
+  await seedCheckins(broken.userId, [venue.id]);
+  await seedCheckins(ghost.userId, [venue.id]);
+  // Opted in, preferred_social set, snapshot corrupt.
+  await env.DB.prepare(
+    `UPDATE "user" SET show_on_leaderboard = 1, preferred_social = 'instagram', gravatar_accounts = 'not-json{{' WHERE id = ?`,
+  )
+    .bind(broken.userId)
+    .run();
+  // Opted in, preferred_social names a platform absent from the snapshot.
+  await env.DB.prepare(
+    `UPDATE "user" SET show_on_leaderboard = 1, preferred_social = 'myspace', gravatar_accounts = ? WHERE id = ?`,
+  )
+    .bind(
+      JSON.stringify([{ platform: "instagram", label: "Instagram", handle: "realhandle", url: "https://instagram.com/realhandle" }]),
+      ghost.userId,
+    )
+    .run();
+  const { res, body } = await board("?kind=checkins&period=all");
+  expect(res.status).toBe(200);
+  const names = body.board.map((r) => r.name);
+  expect(names).not.toContain("realhandle");
+  expect(names.filter((n) => n === "Anonymous").length).toBeGreaterThanOrEqual(2);
+});
+
 it("an opt-out user ranked #1 shows \"Anonymous\"; their display_name never leaks; me keeps the real rank", async () => {
   // Temburong isolates the board from other tests' rows.
   const v1 = await seedVenue("Temburong");

@@ -5,6 +5,7 @@ import { getDb } from "../db/client";
 import { AREAS, VENUE_TYPES } from "../db/schema";
 import type { Env } from "../env";
 import { getTopBadges } from "../lib/badges";
+import { preferredHandle } from "../lib/gravatar";
 import { requireAuth, type AuthVariables } from "../middleware/auth";
 
 // Leaderboard knobs are constants in code, per the phase-2 plan.
@@ -195,21 +196,8 @@ async function getSocialNames(db: ReturnType<typeof getDb>, userIds: string[]): 
     )})
   `)) as { id: string; preferred_social: string | null; gravatar_accounts: string | null }[];
   for (const r of rows) {
-    if (!r.preferred_social || !r.gravatar_accounts) continue;
-    try {
-      const accounts: unknown = JSON.parse(r.gravatar_accounts);
-      if (!Array.isArray(accounts)) continue;
-      const match = accounts.find(
-        (a): a is { platform: string; handle: string } =>
-          typeof a === "object" && a !== null &&
-          (a as { platform?: string }).platform === r.preferred_social &&
-          typeof (a as { handle?: string }).handle === "string" &&
-          (a as { handle?: string }).handle !== "",
-      );
-      if (match) names.set(r.id, match.handle);
-    } catch {
-      // malformed snapshot → no name
-    }
+    const handle = preferredHandle(r.gravatar_accounts, r.preferred_social);
+    if (handle) names.set(r.id, handle);
   }
   return names;
 }

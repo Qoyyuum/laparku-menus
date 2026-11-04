@@ -223,6 +223,30 @@ it("refresh is skipped when GRAVATAR_API_KEY is unset", async () => {
   }
 });
 
+it("GET /api/me survives a Gravatar outage on the stale-refresh path", async () => {
+  const u = await forgeSession("submitter");
+  // Seed a stale snapshot (fetched long ago) so GET /me tries to refresh.
+  await env.DB.prepare(
+    `UPDATE "user" SET gravatar_accounts = ?, gravatar_fetched_at = ? WHERE id = ?`,
+  )
+    .bind(
+      JSON.stringify([{ platform: "x", label: "X", handle: "cachedhandle", url: "https://x.com/cachedhandle" }]),
+      new Date(0).toISOString(),
+      u.userId,
+    )
+    .run();
+  const prevKey = env.GRAVATAR_API_KEY;
+  env.GRAVATAR_API_KEY = "k";
+  const restore = await stubGravatar(`${u.userId}@test.dev`, { fail: true });
+  try {
+    const me = await getMe(u.cookie);
+    expect(me.socials[0]?.handle).toBe("cachedhandle");
+  } finally {
+    restore();
+    env.GRAVATAR_API_KEY = prevKey || "";
+  }
+});
+
 // --- avatar ------------------------------------------------------------------
 
 // Minimal valid-signature payloads — sniffMagic only checks magic bytes.

@@ -97,7 +97,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     void (async () => {
       try {
-        const me = await adminFetch<MeProfile>("/api/me");
+        const me = await adminFetch<MeProfile>("/me");
         if (cancelled || !isThemePref(me.theme)) return;
         setPrefState(me.theme);
         setColorScheme(me.theme);
@@ -120,7 +120,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       // only (the API would 401 anyway). Swallow failures — the pref stays
       // applied locally regardless.
       if (session?.user) {
-        void adminFetch("/api/me", {
+        void adminFetch("/me", {
           method: "PATCH",
           body: JSON.stringify({ theme: p }),
         }).catch(() => {});

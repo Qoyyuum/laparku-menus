@@ -44,8 +44,30 @@ async function seedVenue(name = `RW-${crypto.randomUUID().slice(0, 8)}`) {
 // better-auth `user` table is untracked by drizzle.
 async function setPrefs(
   userId: string,
-  prefs: { display_name?: string | null; show_on_leaderboard?: boolean; show_credit?: boolean },
+  prefs: {
+    display_name?: string | null;
+    show_on_leaderboard?: boolean;
+    show_credit?: boolean;
+    // What public surfaces render now: a Gravatar-verified handle via
+    // preferred_social + the gravatar_accounts snapshot. null clears both.
+    public_name?: string | null;
+  },
 ) {
+  if (prefs.public_name !== undefined) {
+    const accounts = prefs.public_name
+      ? JSON.stringify([
+          {
+            platform: "instagram",
+            label: "Instagram",
+            handle: prefs.public_name,
+            url: `https://instagram.com/${prefs.public_name}`,
+          },
+        ])
+      : null;
+    await env.DB.prepare(`UPDATE "user" SET preferred_social = ?, gravatar_accounts = ? WHERE id = ?`)
+      .bind(prefs.public_name ? "instagram" : null, accounts, userId)
+      .run();
+  }
   if (prefs.display_name !== undefined) {
     await env.DB.prepare(`UPDATE "user" SET display_name = ? WHERE id = ?`)
       .bind(prefs.display_name, userId)
@@ -185,10 +207,11 @@ it("items carry contributed_by only when the source submitter opted into credit"
   const credited = await forgeSession("submitter");
   const shy = await forgeSession("submitter");
   const noName = await forgeSession("submitter");
-  await setPrefs(credited.userId, { display_name: "MenuHunter", show_credit: true });
-  await setPrefs(shy.userId, { display_name: "SecretCreditName", show_credit: false });
-  // Opted in but never set a name — there is nothing safe to render.
-  await setPrefs(noName.userId, { display_name: null, show_credit: true });
+  await setPrefs(credited.userId, { public_name: "MenuHunter", show_credit: true });
+  // Both name sources set, opted out — neither may leak.
+  await setPrefs(shy.userId, { display_name: "SecretCreditName", public_name: "SecretCreditName", show_credit: false });
+  // Opted in but nothing verified — there is nothing safe to render.
+  await setPrefs(noName.userId, { display_name: "FreeformOnly", show_credit: true });
 
   const venue = await seedVenue("Credit Venue");
   const subA = await seedSubmission(credited.userId, "approved");
@@ -217,6 +240,7 @@ it("items carry contributed_by only when the source submitter opted into credit"
     expect(byName[n]?.contributed_by).toBeUndefined();
   }
   expect(JSON.stringify(items)).not.toContain("SecretCreditName");
+  expect(JSON.stringify(items)).not.toContain("FreeformOnly");
 
   // Search results carry the same credit.
   const search = await SELF.fetch("https://x/api/search?q=Credited%20Dish");
