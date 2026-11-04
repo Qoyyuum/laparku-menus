@@ -252,6 +252,10 @@ it("unpublish hides the item, rejects the source submission, and dents submitter
   const { cookie: reviewer, userId: reviewerId } = await forgeSession("reviewer");
   const t = await trustedItem();
 
+  // The trusted publish already credited the submitter an approval.
+  const [before] = await db().select().from(submitters).where(eq(submitters.auth_user_id, t.submitterUserId));
+  expect(before!.approved_count).toBe(1);
+
   const res = await unpublish(t.row.id, reviewer, { reason: "wrong product for this barcode" });
   expect(res.status).toBe(200);
 
@@ -265,9 +269,11 @@ it("unpublish hides the item, rejects the source submission, and dents submitter
   expect(sub!.reviewer_id).toBe(reviewerId);
   expect(sub!.rejection_reason).toBe("wrong product for this barcode");
 
-  // Counts against the submitter's ratio like a rejected submission.
+  // A rejected trusted publish nets like a plain rejection: the approval
+  // credit is clawed back AND the rejection counts.
   const [s] = await db().select().from(submitters).where(eq(submitters.auth_user_id, t.submitterUserId));
   expect(s!.rejected_count).toBe(1);
+  expect(s!.approved_count).toBe(0);
 
   // Off the public menu and out of the queue.
   const pub = await SELF.fetch(`https://x/api/venues/${t.venue.id}/items`);
@@ -281,6 +287,24 @@ it("unpublish hides the item, rejects the source submission, and dents submitter
   expect((await unpublish(t.row.id, reviewer)).status).toBe(409);
   const [s2] = await db().select().from(submitters).where(eq(submitters.auth_user_id, t.submitterUserId));
   expect(s2!.rejected_count).toBe(1);
+  expect(s2!.approved_count).toBe(0);
+});
+
+it("unpublish floors approved_count at 0 — an already-zero counter can't go negative", async () => {
+  const { cookie: reviewer } = await forgeSession("reviewer");
+  const t = await trustedItem();
+
+  // Simulate a counter correction elsewhere (e.g. a prior unpublish of a
+  // different submission already zeroed it — the decrement must floor).
+  await db()
+    .update(submitters)
+    .set({ approved_count: 0 })
+    .where(eq(submitters.auth_user_id, t.submitterUserId));
+
+  expect((await unpublish(t.row.id, reviewer)).status).toBe(200);
+  const [s] = await db().select().from(submitters).where(eq(submitters.auth_user_id, t.submitterUserId));
+  expect(s!.approved_count).toBe(0);
+  expect(s!.rejected_count).toBe(1);
 });
 
 // --- 404s ----------------------------------------------------------------------

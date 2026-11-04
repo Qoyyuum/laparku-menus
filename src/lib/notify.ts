@@ -78,10 +78,11 @@ export async function notifyPublished(env: Env, submission: Submission): Promise
 }
 
 // "Something you scanned was unpublished" email, fired when a reviewer
-// removes a trusted-published item from the verify queue (spec §6 — the
-// submitter hears the same way a rejected submission would). Same
-// best-effort contract as notifyPublished: the item is already hidden, a
-// mailer hiccup must not fail the unpublish.
+// removes a trusted-published item from the verify queue. Spec §6 calls
+// for the Resend path here (unlike a normal pending_review rejection,
+// which sends no email — the submitter never saw their item go live).
+// Same best-effort contract as notifyPublished: the item is already
+// hidden, a mailer hiccup must not fail the unpublish.
 export async function notifyUnpublished(
   env: Env,
   submission: Submission,
@@ -113,29 +114,36 @@ export async function notifyUnpublished(
 // Trusted publishes skip the review queue, so without this email the
 // pending-verification tab could sit unseen. Recipients come off the
 // better-auth `user` table (untracked by drizzle → raw SQL, same convention
-// as the submitter lookups above); roles are comma-separated there, so a
-// substring match covers e.g. "submitter,reviewer". Best-effort like the
-// other notifications — a Resend outage never blocks a publish.
+// as the submitter lookups above); roles are comma-separated there, so
+// they're split and matched in JS — the same check requireAuth applies —
+// rather than a LIKE that could substring-match an unrelated role name.
+// Best-effort like the other notifications — a Resend outage never blocks
+// a publish.
 export async function notifyTrustedPublish(env: Env, venueName: string, count: number): Promise<void> {
   try {
     const rows = (await getDb(env).all(sql`
-      SELECT email FROM "user"
-      WHERE (role LIKE '%reviewer%' OR role LIKE '%admin%')
-        AND (banned IS NULL OR banned = 0)
-    `)) as { email: string }[];
+      SELECT email, role FROM "user" WHERE banned IS NULL OR banned = 0
+    `)) as { email: string; role: string | null }[];
+    const recipients = rows
+      .filter((r) =>
+        (r.role ?? "submitter")
+          .split(",")
+          .some((role) => role === "reviewer" || role === "admin"),
+      )
+      .map((r) => r.email)
+      .filter((e) => typeof e === "string" && e !== "");
     const subject = `${count} product${count === 1 ? "" : "s"} trusted-published at ${venueName} — pending verification`;
     const html =
       `<p>${count} scanned product${count === 1 ? "" : "s"} just went live ` +
       `at <strong>${escapeHtml(venueName)}</strong> through the trusted-publish path.</p>` +
       `<p>They carry the pending-verification badge until a reviewer confirms them.</p>` +
       `<p><a href="${escapeHtml(`${env.PUBLIC_BASE_URL}/admin`)}">Open the verify queue</a></p>`;
-    for (const r of rows) {
-      if (!r.email) continue;
+    for (const email of recipients) {
       try {
-        await sendEmail(env, r.email, subject, html);
+        await sendEmail(env, email, subject, html);
       } catch (e) {
         // One bad recipient/send must not starve the rest of the list.
-        console.log(`[notify] reviewer notice to ${r.email} failed: ${e}`);
+        console.log(`[notify] reviewer notice to ${email} failed: ${e}`);
       }
     }
   } catch (e) {

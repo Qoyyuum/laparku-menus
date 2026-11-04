@@ -288,9 +288,17 @@ adminApi.post("/items/:id/unpublish", async (c) => {
       .returning();
     if (sub) {
       if (sub.submitter_id) {
+        // A rejected trusted publish never earned its approval credit: the
+        // intake path granted approved_count +1 when the items went live,
+        // so the rejection claws it back (floored at 0 — a submitter whose
+        // count was already corrected elsewhere can't go negative). Net
+        // effect matches a plain rejection: 0 approved, +1 rejected.
         await db
           .update(submitters)
-          .set({ rejected_count: sql`${submitters.rejected_count} + 1` })
+          .set({
+            rejected_count: sql`${submitters.rejected_count} + 1`,
+            approved_count: sql`max(${submitters.approved_count} - 1, 0)`,
+          })
           .where(eq(submitters.id, sub.submitter_id));
       }
       const [venue] = await db

@@ -97,11 +97,22 @@ function FlagRow({ flag, onResolve }: { flag: ItemFlag; onResolve: (id: string) 
 // source submission (server-side).
 function PendingRow({ item, onDone }: { item: PendingVerificationItem; onDone: (id: string) => void }) {
   const [busy, setBusy] = useState<"verify" | "unpublish" | null>(null);
+  const [rowError, setRowError] = useState<string | null>(null);
+  // Reviewer opt-in: also graduate nutrition_estimate.status → "verified".
+  const [verifyNutrition, setVerifyNutrition] = useState(false);
   const act = async (action: "verify" | "unpublish") => {
     setBusy(action);
+    setRowError(null);
     try {
-      await adminFetch(`/admin/items/${item.id}/${action}`, { method: "POST", body: "{}" });
+      await adminFetch(`/admin/items/${item.id}/${action}`, {
+        method: "POST",
+        body: action === "verify" && verifyNutrition ? JSON.stringify({ verify_nutrition: true }) : "{}",
+      });
       onDone(item.id);
+    } catch (e) {
+      // A 409/double-action or network failure must not silently strand the
+      // row — surface it so the reviewer can retry or pull-to-refresh.
+      setRowError(e instanceof Error ? e.message : "request failed");
     } finally {
       setBusy(null);
     }
@@ -139,7 +150,7 @@ function PendingRow({ item, onDone }: { item: PendingVerificationItem; onDone: (
           ))}
         </View>
       ) : null}
-      <View className="mt-1 flex-row gap-2">
+      <View className="mt-1 flex-row items-center gap-2">
         <Pressable
           disabled={busy !== null}
           onPress={() => act("verify")}
@@ -154,7 +165,26 @@ function PendingRow({ item, onDone }: { item: PendingVerificationItem; onDone: (
         >
           <Text className="text-xs font-semibold text-white">{busy === "unpublish" ? "Unpublishing…" : "Unpublish"}</Text>
         </Pressable>
+        {item.nutrition_estimate ? (
+          <Pressable
+            disabled={busy !== null}
+            onPress={() => setVerifyNutrition((v) => !v)}
+            className="flex-row items-center gap-1"
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: verifyNutrition }}
+          >
+            <View
+              className={`h-4 w-4 items-center justify-center rounded border ${
+                verifyNutrition ? "border-emerald-700 bg-emerald-700" : "border-neutral-400 bg-white"
+              }`}
+            >
+              {verifyNutrition ? <Text className="text-xs font-bold text-white">✓</Text> : null}
+            </View>
+            <Text className="text-xs text-neutral-700">nutrition verified</Text>
+          </Pressable>
+        ) : null}
       </View>
+      {rowError ? <Text className="text-xs text-red-600">{rowError}</Text> : null}
     </View>
   );
 }
