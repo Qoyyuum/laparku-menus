@@ -1,6 +1,6 @@
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { API_BASE, SOURCE_TYPES } from "../api";
 import { getAuthCookie } from "../auth";
@@ -53,6 +53,41 @@ function SubmitForm() {
   const [turnstileToken, setTurnstileToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+
+  // Web clipboard paste (Ctrl+V): screenshots and copied files attach straight
+  // to the submission without a save-to-disk step. File items are only
+  // consumed when they fit the current source type — image types accept
+  // images, menu_pdf accepts PDFs — so pasting text into the provenance/email
+  // fields is never intercepted.
+  useEffect(() => {
+    if (Platform.OS !== "web") return;
+    const onPaste = (e: ClipboardEvent) => {
+      const pasted: PickedFile[] = [];
+      for (const item of e.clipboardData?.items ?? []) {
+        if (item.kind !== "file") continue;
+        const f = item.getAsFile();
+        if (!f) continue;
+        const isPdf = f.type === "application/pdf";
+        const isImage = f.type.startsWith("image/");
+        if (!isImage && !(isPdf && sourceType === "menu_pdf")) continue;
+        pasted.push({
+          uri: URL.createObjectURL(f),
+          name:
+            f.name && f.name !== "image.png"
+              ? f.name
+              : `pasted-${Date.now()}.${isPdf ? "pdf" : (f.type.split("/")[1] ?? "png")}`,
+          mimeType: f.type,
+          file: f,
+        });
+      }
+      if (pasted.length) {
+        e.preventDefault();
+        setFiles((prev) => [...prev, ...pasted].slice(0, MAX_FILES));
+      }
+    };
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, [sourceType]);
   const [error, setError] = useState<string | null>(null);
 
   async function pick(fromCamera: boolean) {
@@ -225,6 +260,11 @@ function SubmitForm() {
             </Pressable>
           ) : null}
         </View>
+        {Platform.OS === "web" ? (
+          <Text className="text-sm text-neutral-500">
+            Tip: you can also paste a screenshot or copied file with Ctrl+V.
+          </Text>
+        ) : null}
         {files.length > 0 ? (
           <Text className="text-sm text-neutral-600">
             {files.length} file{files.length === 1 ? "" : "s"} selected
