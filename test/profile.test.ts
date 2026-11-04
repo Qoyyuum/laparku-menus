@@ -18,7 +18,9 @@ it("fetchVerifiedAccounts normalizes verified_accounts, hides hidden, [] on 404"
   const realFetch = globalThis.fetch;
   globalThis.fetch = vi.fn(async (input: unknown, init?: RequestInit) => {
     const url = String(input);
-    expect(new Headers(init?.headers).get("authorization")).toBe("Bearer k");
+    expect(
+      ((init as { headers?: Record<string, string> } | undefined)?.headers ?? {}).authorization,
+    ).toBe("Bearer k");
     if (url === `https://api.gravatar.com/v3/profiles/${sha}`) {
       return new Response(
         JSON.stringify({
@@ -50,7 +52,7 @@ it("fetchVerifiedAccounts normalizes verified_accounts, hides hidden, [] on 404"
       );
     }
     return new Response("{}", { status: 404 });
-  }) as typeof fetch;
+  }) as unknown as typeof fetch;
   try {
     const rows = await fetchVerifiedAccounts({ GRAVATAR_API_KEY: "k" } as Env, email);
     expect(rows).toEqual([
@@ -83,7 +85,7 @@ interface MeResponse {
 async function getMe(cookie: string): Promise<MeResponse> {
   const res = await SELF.fetch("https://x/api/me", { headers: { cookie } });
   expect(res.status).toBe(200);
-  return res.json();
+  return (await res.json()) as MeResponse;
 }
 
 async function patchMe(cookie: string, body: unknown): Promise<Response> {
@@ -147,7 +149,7 @@ function stubGravatar(email: string, opts: { fail?: boolean } = {}) {
         return new Response(JSON.stringify(GRAVATAR_PAYLOAD), { status: 200 });
       }
       return new Response("{}", { status: 404 });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
     return () => {
       globalThis.fetch = realFetch;
     };

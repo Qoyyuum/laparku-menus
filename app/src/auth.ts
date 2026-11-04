@@ -5,6 +5,7 @@
 // cookie in expo-secure-store and attaches it to requests; admin API calls go
 // through `adminFetch` below, which forwards the stored cookie as a header.
 import { expoClient } from "@better-auth/expo/client";
+import { passkeyClient } from "@better-auth/passkey/client";
 import { createAuthClient } from "better-auth/react";
 import { adminClient, magicLinkClient } from "better-auth/client/plugins";
 import * as SecureStore from "expo-secure-store";
@@ -23,6 +24,9 @@ export const authClient = createAuthClient({
     }),
     magicLinkClient(),
     adminClient(),
+    // WebAuthn sign-in + management (web only — call sites stay
+    // Platform.OS === "web" gated; the plugin is inert on native).
+    passkeyClient(),
   ],
 });
 

@@ -3,6 +3,7 @@ import { Link, Tabs, type Href } from "expo-router";
 import type { ComponentProps } from "react";
 import { Pressable, View } from "react-native";
 import { authClient } from "../../auth";
+import { navColors, useTheme } from "../../theme";
 
 type IoniconName = ComponentProps<typeof Ionicons>["name"];
 
@@ -13,10 +14,12 @@ function HeaderIconLink({
   href,
   icon,
   label,
+  color,
 }: {
   href: Href;
   icon: IoniconName;
   label: string;
+  color: string;
 }) {
   return (
     <Link href={href} asChild>
@@ -26,7 +29,7 @@ function HeaderIconLink({
         className="px-2.5 py-1"
         hitSlop={8}
       >
-        <Ionicons name={icon} color="#fff" size={22} />
+        <Ionicons name={icon} color={color} size={22} />
       </Pressable>
     </Link>
   );
@@ -37,28 +40,35 @@ function HeaderIconLink({
 // session resolves it flips to the profile icon.
 function HeaderLinks() {
   const { data: session } = authClient.useSession();
+  const { scheme } = useTheme();
+  const color = navColors(scheme).headerText;
   return (
     <View className="flex-row items-center">
-      <HeaderIconLink href="/coverage" icon="map" label="Coverage" />
-      <HeaderIconLink href="/leaderboard" icon="trophy" label="Leaderboards" />
+      <HeaderIconLink href="/coverage" icon="map" label="Coverage" color={color} />
+      <HeaderIconLink href="/leaderboard" icon="trophy" label="Leaderboards" color={color} />
       <HeaderIconLink
         href={session ? "/profile" : "/signin"}
         icon={session ? "person-circle" : "log-in"}
         label={session ? "Profile" : "Sign in"}
+        color={color}
       />
-      <HeaderIconLink href="/about" icon="information-circle" label="About" />
+      <HeaderIconLink href="/about" icon="information-circle" label="About" color={color} />
     </View>
   );
 }
 
 export default function TabsLayout() {
+  const { scheme } = useTheme();
+  const colors = navColors(scheme);
   return (
     <Tabs
       screenOptions={{
-        headerStyle: { backgroundColor: "#047857" },
-        headerTintColor: "#fff",
+        headerStyle: { backgroundColor: colors.headerBg },
+        headerTintColor: colors.headerText,
         headerTitle: "Laparku Menus",
-        tabBarActiveTintColor: "#047857",
+        tabBarActiveTintColor: colors.activeTint,
+        tabBarInactiveTintColor: colors.inactiveTint,
+        tabBarStyle: { backgroundColor: colors.tabBg, borderTopColor: colors.tabBorder },
         headerRight: () => <HeaderLinks />,
       }}
     >

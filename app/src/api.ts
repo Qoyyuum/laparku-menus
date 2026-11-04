@@ -295,10 +295,25 @@ export function badgeName(key: string): string {
 
 // GET /api/me — the signed-in caller's own counts plus their opt-in prefs
 // (the same fields PATCH /api/me writes).
+export type ThemePref = "light" | "dark" | "system";
+
+// A Gravatar-verified social account, normalized server-side
+// (src/lib/gravatar.ts) — the only kind of public name we show.
+export interface VerifiedAccount {
+  platform: string;
+  label: string;
+  handle: string;
+  url: string;
+}
+
 export interface MeProfile {
   display_name: string | null;
   show_on_leaderboard: boolean;
   show_credit: boolean;
+  theme: ThemePref;
+  preferred_social: string | null;
+  socials: VerifiedAccount[];
+  avatar_url: string;
   submissions: number;
   approved: number;
   checkins: number;
