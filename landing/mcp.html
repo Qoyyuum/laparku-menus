@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Connect to the laparku MCP server — laparku</title>
+  <meta name="description" content="How to connect AI agents and MCP clients to the laparku-menus MCP server: endpoint, tools, API keys, and ready-to-paste client configs.">
+  <!-- Single source of truth for the menu app URL. Update this one value to repoint
+       every menu-app link on the page (script at the bottom applies it). -->
+  <meta name="menu-url" content="https://laparku-menus.bbdl.workers.dev">
+  <meta property="og:title" content="Connect to the laparku MCP server">
+  <meta property="og:description" content="Search Brunei's food dataset from any MCP client. Endpoint, tools, API keys, and client configs.">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍜</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    /* MCP docs page additions — kept page-local to avoid touching shared rules. */
+    pre.codeblock {
+      background: #141a16;
+      color: #e8f0ea;
+      border-radius: 12px;
+      padding: 1rem 1.25rem;
+      overflow-x: auto;
+      font-size: 0.84rem;
+      line-height: 1.55;
+      margin: 0.75rem 0 1.25rem;
+    }
+    code { font-family: "SF Mono", "Cascadia Code", Consolas, monospace; }
+    p code, li code, td code {
+      background: #eef3ee;
+      padding: 0.12em 0.35em;
+      border-radius: 6px;
+      font-size: 0.88em;
+    }
+    .tool-table { width: 100%; border-collapse: collapse; margin: 0.75rem 0 1.5rem; font-size: 0.92rem; }
+    .tool-table th, .tool-table td { text-align: left; padding: 0.6rem 0.75rem; border-bottom: 1px solid #e2e9e2; vertical-align: top; }
+    .tool-table th { font-weight: 600; color: #2b3a2f; }
+    .tool-table td:last-child { color: #4d5d52; }
+    .step-num {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 1.6rem; height: 1.6rem; border-radius: 999px;
+      background: #1f6b3a; color: #fff; font-weight: 600; font-size: 0.85rem;
+      margin-right: 0.5rem; vertical-align: middle;
+    }
+    .note {
+      background: #f2f6f0; border-left: 3px solid #1f6b3a;
+      padding: 0.8rem 1rem; border-radius: 0 10px 10px 0;
+      font-size: 0.92rem; color: #39493e; margin: 1rem 0 1.5rem;
+    }
+    .section h3 { margin: 1.75rem 0 0.4rem; font-family: "Fraunces", serif; font-size: 1.25rem; color: #1c2b21; }
+  </style>
+</head>
+<body>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="index.html" aria-label="laparku home">
+        <span class="brand-mark" aria-hidden="true">🍜</span> laparku
+      </a>
+      <nav class="site-nav" aria-label="Main">
+        <a data-menu-url href="https://laparku-menus.bbdl.workers.dev">Menu&nbsp;app</a>
+        <a href="mcp.html" aria-current="page">MCP</a>
+        <a href="https://github.com/Qoyyuum/laparku-menus" rel="noopener">GitHub</a>
+        <a href="https://buymeacoffee.com/qoyyuum" rel="noopener">Support</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="top">
+
+    <section class="hero container">
+      <p class="eyebrow">For agents &amp; developers</p>
+      <h1>Connect to the<br>laparku MCP server.</h1>
+      <p class="lede">
+        laparku-menus exposes an MCP (Model Context Protocol) server over Streamable
+        HTTP, so any MCP client — Claude Code, Claude Desktop, an agent you write —
+        can search Brunei's crowdsourced food dataset and file menu submissions.
+      </p>
+    </section>
+
+    <section class="section container">
+      <h2 id="endpoint">The endpoint</h2>
+      <p>
+        One URL, POST-only, JSON-RPC over Streamable HTTP:
+      </p>
+      <pre class="codeblock"><code id="mcp-url">https://laparku-menus.bbdl.workers.dev/mcp</code></pre>
+      <p>
+        Requests must send <code>Accept: application/json, text/event-stream</code> and
+        <code>Content-Type: application/json</code>. The server is stateless — no session
+        cookies, no resumable streams. Each request creates and tears down a session
+        inside one response.
+      </p>
+      <div class="note">
+        Quick health check — this initialize handshake should return a JSON-RPC result
+        naming the server:
+        <pre class="codeblock"><code>curl -s -X POST https://laparku-menus.bbdl.workers.dev/mcp \
+  -H 'Accept: application/json, text/event-stream' \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"curl","version":"1.0"}}}'</code></pre>
+      </div>
+    </section>
+
+    <section class="section container">
+      <h2 id="clients">Client configs</h2>
+
+      <h3><span class="step-num">1</span>Claude Code</h3>
+      <p>From a terminal, register it as an HTTP server:</p>
+      <pre class="codeblock"><code>claude mcp add --transport http laparku-menus \
+  https://laparku-menus.bbdl.workers.dev/mcp</code></pre>
+
+      <h3><span class="step-num">2</span>Claude Desktop / other MCP clients</h3>
+      <p>
+        For clients that only launch stdio servers locally, point them at a
+        stdio-to-HTTP bridge such as <code>mcp-remote</code> and give it the endpoint URL:
+      </p>
+      <pre class="codeblock"><code>{
+  "mcpServers": {
+    "laparku-menus": {
+      "command": "npx",
+      "args": ["mcp-remote", "https://laparku-menus.bbdl.workers.dev/mcp"]
+    }
+  }
+}</code></pre>
+
+      <h3><span class="step-num">3</span>From your own code</h3>
+      <p>
+        Use any MCP client SDK in Streamable-HTTP mode. With the official TypeScript SDK:
+      </p>
+      <pre class="codeblock"><code>import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+
+const client = new Client({ name: "my-app", version: "1.0.0" });
+await client.connect(new StreamableHTTPClientTransport(
+  new URL("https://laparku-menus.bbdl.workers.dev/mcp"),
+));
+const { tools } = await client.listTools();
+const result = await client.callTool({
+  name: "search_items",
+  arguments: { query: "nasi katok", filters: { area: "Brunei-Muara" } },
+});</code></pre>
+    </section>
+
+    <section class="section container">
+      <h2 id="tools">Available tools</h2>
+      <p>
+        Read tools are public — no authentication needed. Write tools take your API
+        key as a tool argument called <code>api_key</code>.
+      </p>
+      <table class="tool-table">
+        <thead>
+          <tr><th>Tool</th><th>Auth</th><th>What it does</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>search_items</code></td>
+            <td>public</td>
+            <td>
+              Full-text search over published items and venues.
+              Args: <code>query</code> (string, required), <code>filters</code> —
+              <code>venue_type</code>, <code>item_type</code> (dish|product),
+              <code>area</code>, <code>halal</code>, <code>tag</code>,
+              <code>max_price</code> (BND).
+            </td>
+          </tr>
+          <tr>
+            <td><code>list_venues</code></td>
+            <td>public</td>
+            <td>
+              List published venues.
+              Args: <code>filters</code> — <code>type</code>, <code>area</code>,
+              <code>halal</code>, <code>q</code>.
+            </td>
+          </tr>
+          <tr>
+            <td><code>get_venue_items</code></td>
+            <td>public</td>
+            <td>
+              The current published menu of one venue.
+              Args: <code>venue_id</code> (required).
+            </td>
+          </tr>
+          <tr>
+            <td><code>submit_menu</code></td>
+            <td>api_key</td>
+            <td>
+              File a submission for human review — nothing publishes without
+              approval. Args: <code>api_key</code>, <code>payload</code> with
+              <code>source_type</code> (menu_pdf, menu_photo, product_photo,
+              barcode, url, manual_entry), <code>provenance</code> (where the data
+              came from — required), optional <code>contact</code>,
+              <code>files</code> (base64 jpeg/png/webp/pdf) or
+              <code>items</code> (manual_entry only).
+            </td>
+          </tr>
+          <tr>
+            <td><code>get_submission_status</code></td>
+            <td>api_key</td>
+            <td>
+              Check one of your own submissions — a key only sees what it filed.
+              Args: <code>id</code> (from submit_menu), <code>api_key</code>.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        Valid enum values — <code>area</code>: Brunei-Muara, Tutong, Belait,
+        Temburong. <code>venue_type</code>: restaurant, stall, supermarket,
+        grocer, convenience. <code>halal</code>: halal-certified, muslim-owned,
+        non-halal, unknown, n-a.
+      </p>
+    </section>
+
+    <section class="section container">
+      <h2 id="apikey">Getting an API key</h2>
+      <p>
+        Keys belong to a submitter account, which is how submissions and
+        reputation are attributed:
+      </p>
+      <ol>
+        <li>Open the <a data-menu-url href="https://laparku-menus.bbdl.workers.dev">menu app</a> and sign in — magic link, no password.</li>
+        <li>
+          Create a key via the auth API while signed in:
+          <pre class="codeblock"><code>curl -s -X POST https://laparku-menus.bbdl.workers.dev/api/auth/api-key/create \
+  -H 'Content-Type: application/json' \
+  -H 'Cookie: &lt;your session cookie&gt;' \
+  -d '{"name":"my-agent"}'</code></pre>
+        </li>
+        <li>
+          Pass the returned key as the <code>api_key</code> argument to
+          <code>submit_menu</code> and <code>get_submission_status</code>. Keep it
+          secret — it identifies you.
+        </li>
+      </ol>
+      <div class="note">
+        The key travels inside tool arguments, not headers — that keeps auth out
+        of connection config but means MCP clients may log it in traces. Treat
+        agent logs accordingly.
+      </div>
+    </section>
+
+    <section class="support-band">
+      <div class="container support-inner">
+        <h2>Build something on it</h2>
+        <p>
+          The dataset is open and growing — a diet coach that plans hawker meals,
+          a grocery price tracker, a meal-planner that knows what's nearby. If
+          your app needs a tool that doesn't exist yet, open an issue.
+        </p>
+        <div class="cta-row">
+          <a class="btn btn-light" href="https://github.com/Qoyyuum/laparku-menus" rel="noopener">
+            Contribute on GitHub
+          </a>
+          <a class="btn btn-outline-light" href="https://buymeacoffee.com/qoyyuum" rel="noopener">
+            <span aria-hidden="true">☕</span> Buy me a coffee
+          </a>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <p>laparku — a community project from Brunei Darussalam.</p>
+      <p>
+        <a href="index.html">Home</a>
+        · <a href="https://github.com/Qoyyuum/laparku-menus" rel="noopener">Source on GitHub</a>
+        · <a href="https://buymeacoffee.com/qoyyuum" rel="noopener">Support</a>
+      </p>
+    </div>
+  </footer>
+
+  <script>
+    // Repoint every menu-app link from the single meta tag.
+    const menuUrl = document.querySelector('meta[name="menu-url"]')?.content;
+    if (menuUrl) {
+      document.querySelectorAll("[data-menu-url]").forEach((a) => (a.href = menuUrl));
+      const mcpEl = document.getElementById("mcp-url");
+      if (mcpEl) mcpEl.textContent = menuUrl + "/mcp";
+    }
+  </script>
+</body>
+</html>
