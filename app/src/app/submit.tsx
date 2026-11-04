@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Image, Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { API_BASE, SOURCE_TYPES } from "../api";
 import { getAuthCookie } from "../auth";
+import { ScanTab } from "../components/ScanTab";
 import { SignInGate } from "../components/SignInGate";
 import { Turnstile } from "../components/Turnstile";
 
@@ -67,6 +68,9 @@ export default function SubmitScreen() {
 }
 
 function SubmitForm() {
+  // Page-level mode: the classic photo/file form vs the Scans tab
+  // (continuous-decode barcode capture → trusted-publish batch).
+  const [mode, setMode] = useState<"form" | "scan">("form");
   const [sourceType, setSourceType] = useState<(typeof PICKABLE_SOURCE_TYPES)[number]>("menu_photo");
   const [provenance, setProvenance] = useState("");
   const [email, setEmail] = useState("");
@@ -168,6 +172,16 @@ function SubmitForm() {
     }
   }
 
+  // Miss-path handoff (spec §3): an unknown scan code switches to the
+  // product-photo form with the digits carried in provenance so a reviewer
+  // can match them against the photo.
+  function addPhotosForCode(code: string, venueName: string) {
+    setMode("form");
+    setSourceType("product_photo");
+    setProvenance((p) => p.trim() || `Product photo at ${venueName} — barcode ${code}`);
+    setMessage(null);
+  }
+
   // FormData wants platform-specific file parts: RN's {uri,name,type} object
   // on native, a real Blob/File on web.
   async function appendFiles(form: FormData) {
@@ -240,6 +254,31 @@ function SubmitForm() {
         are checked by a reviewer before they go live.
       </Text>
 
+      {/* Mode tabs: the classic photo/file form vs the continuous-decode
+          scanner. Scanning is the packaged-product path — menus and dishes
+          stay on the photo form. */}
+      <View className="flex-row rounded-lg border border-neutral-300 bg-white p-1">
+        {(["form", "scan"] as const).map((m) => (
+          <Pressable
+            key={m}
+            className={`flex-1 items-center rounded-md px-3 py-1.5 ${
+              mode === m ? "bg-emerald-700" : ""
+            }`}
+            onPress={() => setMode(m)}
+          >
+            <Text
+              className={`text-sm font-semibold ${mode === m ? "text-white" : "text-neutral-700"}`}
+            >
+              {m === "form" ? "Photos / files" : "Scans"}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+
+      {mode === "scan" ? (
+        <ScanTab onAddPhotos={addPhotosForCode} />
+      ) : (
+        <>
       <View className="gap-1.5">
         <Text className="text-sm font-semibold text-neutral-800">What are you submitting?</Text>
         <View className="flex-row flex-wrap gap-2">
@@ -374,6 +413,8 @@ function SubmitForm() {
       >
         <Text className="text-base font-semibold text-white">{busy ? "Uploading…" : "Submit"}</Text>
       </Pressable>
+        </>
+      )}
 
       {/* Tap a thumbnail to inspect it full-size before submitting — tap the
           backdrop or the X to dismiss. */}

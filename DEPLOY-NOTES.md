@@ -103,6 +103,26 @@ Empty result sets are expected — fresh database, no approved submissions yet.
    once a real user signs up.
 5. **Optional: EAS Build** for native store distribution (deferred).
 
+## App-side verification — Scans tab (phase 3, Task 5)
+
+The app has no test infra; the scanner flow is verified manually. Checklist:
+
+- **Web** (`bun run build:web` or `expo start --web` → /submit → "Scans" tab):
+  pick a venue via search → allow camera → hold a product barcode up → a row
+  lands in the capture list and resolves to a name or "unknown product";
+  sweeping back over the same code within ~3 s does not duplicate it. Deny
+  the camera → the "type it instead" field still captures. Submit a mixed
+  batch → the result card shows published / queued / already-on-menu counts.
+- **Native** (`expo start` on a device, `EXPO_PUBLIC_API_URL` set to the
+  worker): "Use my location" lists nearby venues with distance (denied →
+  manual search unchanged); a new capture vibrates; permission-denied falls
+  back to typed entry.
+- Lookup misses: "Add photos" on an unknown code switches to the
+  product-photo form with the digits prefilled in provenance.
+
+New app deps: `expo-camera`, `expo-location`, `@zxing/browser` (+ its
+`@zxing/library` peer for format hints).
+
 ## Repo notes for this deploy
 
 - `wrangler.toml` now carries real resource IDs — committed (IDs aren't secrets).

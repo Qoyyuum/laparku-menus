@@ -34,7 +34,19 @@
           "imageWidth": 76
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Laparku Menus to use your camera to scan product barcodes."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow Laparku Menus to suggest venues near you when you scan products."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

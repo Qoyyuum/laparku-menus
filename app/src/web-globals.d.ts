@@ -29,3 +29,22 @@ interface ImageBitmap {
 }
 
 declare function createImageBitmap(source: Blob): Promise<ImageBitmap>;
+
+// Video element surface used by ScanCamera.web.tsx — the zxing reader
+// attaches the getUserMedia stream to the element itself and read result-
+// point coordinates back off videoWidth/videoHeight for the chip overlay.
+interface HTMLVideoElement {
+  videoWidth: number;
+  videoHeight: number;
+  srcObject: unknown;
+  play(): Promise<void>;
+  pause(): void;
+  getBoundingClientRect(): {
+    left: number;
+    top: number;
+    right: number;
+    bottom: number;
+    width: number;
+    height: number;
+  };
+}

@@ -316,3 +316,107 @@ export interface StatsResponse {
 export function formatBnd(price: number | null): string {
   return price == null ? "—" : `B$${price.toFixed(2)}`;
 }
+
+// --- Types mirroring the scan surface -------------------------------------
+// (src/routes/products.ts, src/routes/nearby.ts, src/routes/scan.ts — the
+// endpoints the Scans tab consumes; see plan Task 5 / spec §1–§5.)
+
+// GET /api/products/lookup/:code — the merged multi-provider answer for one
+// barcode. `sources` is provenance: every provider that recognized the code.
+export interface ProductLookupResult {
+  found: boolean;
+  product?: {
+    name?: string;
+    brand?: string;
+    package_size?: string;
+    nutrition_estimate?: NutritionEstimate;
+    image_url?: string;
+  };
+  sources: { provider: string; url?: string }[];
+}
+
+export function lookupProduct(code: string): Promise<ProductLookupResult> {
+  return apiFetch(`/products/lookup/${encodeURIComponent(code)}`);
+}
+
+// GET /api/venues/nearby — GPS assist for the scan venue pick.
+export interface NearbyVenue {
+  id: string;
+  name: string;
+  type: (typeof VENUE_TYPES)[number];
+  area: (typeof AREAS)[number];
+  distance_m: number;
+}
+
+export async function nearbyVenues(lat: number, lng: number, limit = 5): Promise<NearbyVenue[]> {
+  const res = await apiFetch<{ venues: NearbyVenue[] }>(
+    `/venues/nearby?lat=${lat}&lng=${lng}&limit=${limit}`,
+  );
+  return res.venues;
+}
+
+// One resolved batch item for POST /api/submissions/scan. `source_tags`
+// carries the lookup's provider names — the server's trust gate only
+// trusted-publishes codes with a `found` row in product_lookup_cache, so an
+// item here must have gone through lookupProduct first or it can never
+// publish (it queues for review instead).
+export interface ScanSubmitItem {
+  barcode: string;
+  name: string;
+  brand?: string;
+  package_size?: string;
+  nutrition_estimate?: NutritionEstimate;
+  source_tags: string[];
+}
+
+export interface ScanSubmitResult {
+  // The trusted_published submission when ≥1 item went live, else null.
+  submission_id: string | null;
+  // The pending_review submission holding over-cap items, else null.
+  review_submission_id: string | null;
+  published: number;
+  queued: number;
+  // Re-scans of barcodes already live at this venue (freshness re-checks).
+  stale_lookup: number;
+}
+
+// POST /api/submissions/scan — session-gated JSON batch intake. Same header
+// convention as the photo-form submit: web rides the same-origin cookie;
+// native forwards the expoClient-stored cookie explicitly. The auth import
+// is lazy — auth.ts reads API_BASE at module init, so a top-level import
+// here would be a circular dependency.
+export async function submitScan(body: {
+  venue_id: string;
+  provenance: string;
+  items: ScanSubmitItem[];
+}): Promise<ScanSubmitResult> {
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (Platform.OS !== "web") {
+    if (API_BASE.startsWith("/")) {
+      throw new Error(
+        "EXPO_PUBLIC_API_URL is not set — native builds need the deployed worker API URL.",
+      );
+    }
+    headers["X-Laparku-Client"] = "app";
+    const { getAuthCookie } = await import("./auth");
+    const cookie = await getAuthCookie();
+    if (cookie) headers.cookie = cookie;
+  }
+  const res = await fetch(`${API_BASE}/submissions/scan`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+    credentials: "include",
+  });
+  if (!res.ok) {
+    let message = `scan submission failed (${res.status})`;
+    try {
+      const errBody = (await res.json()) as { error?: string };
+      if (errBody.error) message = errBody.error;
+    } catch {
+      // non-JSON error body — keep the status-based message
+    }
+    throw new Error(message);
+  }
+  return res.json() as Promise<ScanSubmitResult>;
+}
