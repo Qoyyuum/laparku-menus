@@ -1,29 +1,52 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { Link, Tabs } from "expo-router";
-import { Text, View } from "react-native";
+import { Link, Tabs, type Href } from "expo-router";
+import type { ComponentProps } from "react";
+import { Pressable, View } from "react-native";
 import { authClient } from "../../auth";
 
-// Header links with a session-aware entry point: signed-out visitors see
-// "Sign in" (→ /profile, whose gate prompts the magic-link flow); once the
-// session resolves it flips to "Profile".
+type IoniconName = ComponentProps<typeof Ionicons>["name"];
+
+// Icon-only header button — navigation chrome stays language-neutral so the
+// UI doesn't need translated labels to be navigable. The accessibilityLabel
+// keeps the destination readable for screen readers.
+function HeaderIconLink({
+  href,
+  icon,
+  label,
+}: {
+  href: Href;
+  icon: IoniconName;
+  label: string;
+}) {
+  return (
+    <Link href={href} asChild>
+      <Pressable
+        accessibilityLabel={label}
+        accessibilityRole="button"
+        className="px-2.5 py-1"
+        hitSlop={8}
+      >
+        <Ionicons name={icon} color="#fff" size={22} />
+      </Pressable>
+    </Link>
+  );
+}
+
+// Header links with a session-aware entry point: signed-out visitors get a
+// log-in icon (→ /profile, whose gate prompts the magic-link flow); once the
+// session resolves it flips to the profile icon.
 function HeaderLinks() {
   const { data: session } = authClient.useSession();
   return (
-    <View className="flex-row">
-      <Link href="/coverage">
-        <Text className="px-4 text-base font-medium text-white">Coverage</Text>
-      </Link>
-      <Link href="/leaderboard">
-        <Text className="px-4 text-base font-medium text-white">Boards</Text>
-      </Link>
-      <Link href="/profile">
-        <Text className="px-4 text-base font-medium text-white">
-          {session ? "Profile" : "Sign in"}
-        </Text>
-      </Link>
-      <Link href="/about">
-        <Text className="px-4 text-base font-medium text-white">About</Text>
-      </Link>
+    <View className="flex-row items-center">
+      <HeaderIconLink href="/coverage" icon="map" label="Coverage" />
+      <HeaderIconLink href="/leaderboard" icon="trophy" label="Leaderboards" />
+      <HeaderIconLink
+        href="/profile"
+        icon={session ? "person-circle" : "log-in"}
+        label={session ? "Profile" : "Sign in"}
+      />
+      <HeaderIconLink href="/about" icon="information-circle" label="About" />
     </View>
   );
 }

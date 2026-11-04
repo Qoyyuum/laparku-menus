@@ -1,3 +1,4 @@
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { Link } from "expo-router";
 import { useEffect, useState } from "react";
 import { Pressable, Text, View } from "react-native";
@@ -45,12 +46,14 @@ export function ContributeBanner() {
       </View>
       <View className="flex-row gap-2">
         <Link href="/submit" asChild>
-          <Pressable className="rounded-lg bg-emerald-700 px-4 py-2.5">
+          <Pressable className="flex-row items-center gap-1.5 rounded-lg bg-emerald-700 px-4 py-2.5">
+            <Ionicons name="add" color="#fff" size={16} />
             <Text className="text-sm font-semibold text-white">Submit a menu</Text>
           </Pressable>
         </Link>
         <Link href="/coverage" asChild>
-          <Pressable className="rounded-lg border border-emerald-700 bg-white px-4 py-2.5">
+          <Pressable className="flex-row items-center gap-1.5 rounded-lg border border-emerald-700 bg-white px-4 py-2.5">
+            <Ionicons name="map" color="#047857" size={16} />
             <Text className="text-sm font-semibold text-emerald-700">See coverage</Text>
           </Pressable>
         </Link>
