@@ -86,6 +86,11 @@ export const venues = sqliteTable("venues", {
   // venue lists/search with `is_stub` on the payload; approving a
   // submission onto a stub clears the flag (see src/lib/publish.ts).
   is_stub: integer("is_stub", { mode: "boolean" }).notNull().default(false),
+  // OpenStreetMap provenance for venues created from a Nominatim pick via
+  // POST /api/venues — "<osm_type>/<osm_id>" (e.g. "node/123", "way/456").
+  // Doubles as the dedup key: a second create for the same OSM object
+  // returns the existing row instead of inserting a twin.
+  osm_ref: text("osm_ref"),
   created_at: createdAt(),
   updated_at: updatedAt(),
 });

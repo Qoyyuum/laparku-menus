@@ -15,6 +15,7 @@ import productsApi from "./routes/products";
 import publicApi from "./routes/public";
 import scanApi from "./routes/scan";
 import submissionsApi from "./routes/submissions";
+import venuesApi from "./routes/venues";
 import verifyApi from "./routes/verify";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -35,6 +36,7 @@ app.route("/api", coverageApi);
 app.route("/api", nearbyApi);
 app.route("/api", productsApi);
 app.route("/api", scanApi);
+app.route("/api", venuesApi);
 app.route("/api/admin", adminApi);
 
 export default {

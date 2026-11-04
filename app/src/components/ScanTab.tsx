@@ -30,10 +30,14 @@ import {
 } from "react-native";
 import {
   apiFetch,
+  createVenue,
   lookupProduct,
   nearbyVenues,
+  osmReverse,
+  osmSearch,
   submitScan,
   type NearbyVenue,
+  type OsmPlace,
   type ProductLookupResult,
   type ScanSubmitResult,
   type Venue,
@@ -661,11 +665,30 @@ function CaptureRow({ capture, onRemove }: { capture: Capture; onRemove: () => v
   );
 }
 
+// Best-effort map from a Nominatim class/type pair onto our venue enum —
+// an unmapped shop still lands somewhere sensible (restaurant is the
+// schema default and reviewers can reclassify).
+function osmVenueType(p: OsmPlace): Venue["type"] {
+  if (p.class === "shop") {
+    if (p.type === "supermarket" || p.type === "wholesale" || p.type === "department_store") {
+      return "supermarket";
+    }
+    if (p.type === "convenience" || p.type === "kiosk") return "convenience";
+    return "grocer";
+  }
+  if (p.class === "amenity" && (p.type === "marketplace" || p.type === "food_court")) {
+    return "stall";
+  }
+  return "restaurant";
+}
+
 // Venue pick, submit-time edition (spec §3): "Use my location" →
 // /api/venues/nearby → "Near you" top-5 with the closest preselected;
 // on web an OSM map with a draggable pin re-queries the list for wherever
-// the pin lands; the venue search stays the manual fallback — and now
-// says so when a search comes up empty or fails instead of looking dead.
+// the pin lands (and reverse-geocodes a "use this place?" suggestion);
+// the search box queries both our venues table and OpenStreetMap via
+// /api/venues/osm-search — picking an OSM row trusted-creates the venue
+// through POST /api/venues so anything in the real world is scannable.
 function VenuePicker({
   onPick,
   selected,
@@ -681,9 +704,20 @@ function VenuePicker({
   const [locMsg, setLocMsg] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Venue[]>([]);
+  const [osmResults, setOsmResults] = useState<OsmPlace[]>([]);
   const [searching, setSearching] = useState(false);
   const [searched, setSearched] = useState(false);
   const [searchErr, setSearchErr] = useState<string | null>(null);
+  // A venue-create POST in flight (OSM pick or pin suggestion) — holds the
+  // row's label so the list can show progress and ignore double-taps.
+  const [creating, setCreating] = useState<string | null>(null);
+  // Web-only: the reverse-geocoded name at the dropped pin.
+  const [pinSuggestion, setPinSuggestion] = useState<{
+    name: string;
+    address?: string;
+    lat: number;
+    lng: number;
+  } | null>(null);
   // The venue id we last auto-preselected — the refresh may preselect the
   // closest hit again only when nothing (or only that auto-pick) is
   // selected, so a deliberate tap is never clobbered by a pin drag.
@@ -691,9 +725,11 @@ function VenuePicker({
   // Debounce callbacks see the latest selection/props without re-binding.
   const selectedRef = useRef(selectedId);
   const onPickRef = useRef(onPick);
+  const posRef = useRef(pos);
   useEffect(() => {
     selectedRef.current = selectedId;
     onPickRef.current = onPick;
+    posRef.current = pos;
   });
 
   // GPS fixes and pin moves funnel into one debounced nearby refresh.
@@ -719,6 +755,26 @@ function VenuePicker({
         }
       })();
     }, 400);
+    return () => clearTimeout(t);
+  }, [located, pos]);
+
+  // Web-only pin-drop reverse geocode (debounced separately from the
+  // nearby refresh — a slightly longer window keeps Nominatim calls well
+  // under the 1 req/s polite ceiling while dragging). A named feature at
+  // the pin becomes a tappable "use this place?" suggestion.
+  useEffect(() => {
+    if (!located || Platform.OS !== "web") return;
+    setPinSuggestion(null);
+    const t = setTimeout(() => {
+      const p = posRef.current;
+      void osmReverse(p.lat, p.lng)
+        .then((r) => {
+          if (r.name) setPinSuggestion({ name: r.name, address: r.address, lat: p.lat, lng: p.lng });
+        })
+        .catch(() => {
+          // A failed reverse is invisible — the map and search still work.
+        });
+    }, 700);
     return () => clearTimeout(t);
   }, [located, pos]);
 
@@ -759,15 +815,16 @@ function VenuePicker({
     setLocated(true);
   }, []);
 
-  // Debounced venue search — the manual fallback, also the path for venues
-  // with no geo on record. Empty and failed searches both get a visible
-  // state: the old version rendered nothing in either case, which is what
-  // made typing into this box look dead.
+  // Debounced venue search — fires OUR venues table and the OSM proxy in
+  // parallel (Promise.allSettled: a failed leg never kills the other).
+  // Our rows render first, the real-world candidates below them. Empty
+  // and failed searches both get a visible state.
   useEffect(() => {
     const q = query.trim();
     setSearched(false);
     if (q.length < 2) {
       setResults([]);
+      setOsmResults([]);
       setSearching(false);
       setSearchErr(null);
       return;
@@ -776,17 +833,21 @@ function VenuePicker({
     const t = setTimeout(() => {
       setSearching(true);
       setSearchErr(null);
-      apiFetch<{ venues: Venue[] }>(`/venues?q=${encodeURIComponent(q)}`)
-        .then((res) => {
+      // The picker pin bounds the OSM query to the user's area (~0.5°);
+      // the default BSB point still biases correctly pre-GPS.
+      const { lat, lng } = posRef.current;
+      void Promise.allSettled([
+        apiFetch<{ venues: Venue[] }>(`/venues?q=${encodeURIComponent(q)}`),
+        osmSearch(q, lat, lng),
+      ])
+        .then(([ours, osm]) => {
           if (dead) return;
-          setResults(res.venues.slice(0, SEARCH_LIMIT));
+          setResults(ours.status === "fulfilled" ? ours.value.venues.slice(0, SEARCH_LIMIT) : []);
+          setOsmResults(osm.status === "fulfilled" ? osm.value : []);
           setSearched(true);
-        })
-        .catch(() => {
-          if (dead) return;
-          setResults([]);
-          setSearched(true);
-          setSearchErr("Venue search didn't go through — check the connection and try again.");
+          if (ours.status === "rejected" && osm.status === "rejected") {
+            setSearchErr("Venue search didn't go through — check the connection and try again.");
+          }
         })
         .finally(() => {
           if (!dead) setSearching(false);
@@ -797,6 +858,45 @@ function VenuePicker({
       clearTimeout(t);
     };
   }, [query]);
+
+  // Shared create path for both OSM entry points (search row, pin
+  // suggestion): POST /api/venues trusted-creates (or dedup-returns) the
+  // venue, then it becomes the pick like any other row.
+  async function createAndPick(
+    key: string,
+    body: { name: string; type?: Venue["type"]; address?: string; lat: number; lng: number; osm_ref?: string },
+  ) {
+    if (creating) return;
+    setCreating(key);
+    setSearchErr(null);
+    try {
+      const venue = await createVenue(body);
+      onPickRef.current({ id: venue.id, name: venue.name });
+      setPinSuggestion(null);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "";
+      setSearchErr(
+        msg === "unauthorized"
+          ? "Sign in first to add a new place."
+          : "Couldn't add that place — try again, or pick a venue above.",
+      );
+    } finally {
+      setCreating(null);
+    }
+  }
+
+  // Picking an OSM candidate maps its class/type onto our venue enum and
+  // trusted-creates the venue on the spot.
+  function pickOsm(p: OsmPlace) {
+    void createAndPick(`${p.osm_type}/${p.osm_id}`, {
+      name: p.name,
+      type: osmVenueType(p),
+      address: p.display_name !== p.name ? p.display_name : undefined,
+      lat: p.lat,
+      lng: p.lng,
+      osm_ref: `${p.osm_type}/${p.osm_id}`,
+    });
+  }
 
   const trimmedQuery = query.trim();
 
@@ -833,6 +933,31 @@ function VenuePicker({
             Off by a bit? Drag the pin — or tap the map — to where you're standing. Nearby venues
             update automatically.
           </Text>
+          {pinSuggestion && selected?.name !== pinSuggestion.name ? (
+            <Pressable
+              className="rounded-lg border border-sky-300 bg-sky-50 px-3 py-2"
+              disabled={creating !== null}
+              onPress={() =>
+                void createAndPick("pin", {
+                  name: pinSuggestion.name,
+                  address: pinSuggestion.address,
+                  lat: pinSuggestion.lat,
+                  lng: pinSuggestion.lng,
+                })
+              }
+            >
+              <Text className="text-sm font-semibold text-sky-900">
+                {creating === "pin"
+                  ? "Adding…"
+                  : `Looks like ${pinSuggestion.name} — use this place?`}
+              </Text>
+              {pinSuggestion.address ? (
+                <Text className="text-xs text-sky-800" numberOfLines={1}>
+                  {pinSuggestion.address}
+                </Text>
+              ) : null}
+            </Pressable>
+          ) : null}
         </View>
       ) : null}
 
@@ -871,9 +996,9 @@ function VenuePicker({
         <Text className="text-xs text-neutral-400">Keep typing — search starts at 2 letters.</Text>
       ) : null}
       {searchErr ? <Text className="text-xs text-red-600">{searchErr}</Text> : null}
-      {searched && !searchErr && results.length === 0 ? (
+      {searched && !searchErr && results.length === 0 && osmResults.length === 0 ? (
         <Text className="text-xs text-neutral-500">
-          No venues found for "{trimmedQuery}" — check the name, or drop the pin where you are and
+          No places found for "{trimmedQuery}" — check the name, or drop the pin where you are and
           see what's nearby.
         </Text>
       ) : null}
@@ -889,6 +1014,47 @@ function VenuePicker({
           </Text>
         </Pressable>
       ))}
+
+      {/* Real-world candidates from the OSM proxy — visually marked so an
+          "add this place" row never reads like an existing venue. Picking
+          one trusted-creates it server-side (POST /api/venues). */}
+      {osmResults.length > 0 ? (
+        <View className="gap-1.5">
+          <Text className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+            From OpenStreetMap
+          </Text>
+          {osmResults.map((p) => {
+            const key = `${p.osm_type}/${p.osm_id}`;
+            const chip = [p.class, p.type].filter(Boolean).join(" · ");
+            return (
+              <Pressable
+                key={key}
+                className="gap-0.5 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 disabled:opacity-50"
+                disabled={creating !== null}
+                onPress={() => pickOsm(p)}
+              >
+                <View className="flex-row items-center gap-2">
+                  <Text className="flex-1 text-sm font-semibold text-neutral-900" numberOfLines={1}>
+                    {creating === key ? `Adding ${p.name}…` : p.name}
+                  </Text>
+                  {chip ? (
+                    <Text className="rounded bg-sky-200/70 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-900">
+                      {chip}
+                    </Text>
+                  ) : null}
+                </View>
+                <Text className="text-xs text-neutral-500" numberOfLines={1}>
+                  {p.display_name}
+                </Text>
+                <Text className="text-[10px] text-sky-700">from OpenStreetMap</Text>
+              </Pressable>
+            );
+          })}
+          <Text className="text-[10px] text-neutral-400">
+            Search results from OpenStreetMap © OpenStreetMap contributors
+          </Text>
+        </View>
+      ) : null}
     </View>
   );
 }

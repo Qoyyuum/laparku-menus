@@ -66,6 +66,9 @@ export interface Venue {
   // (src/lib/freshness.ts): <3mo fresh, <6mo aging, otherwise stale.
   freshness?: "fresh" | "aging" | "stale";
   last_verified_at?: number | null;
+  geo?: { lat: number; lng: number } | null;
+  // OSM provenance on venues created via POST /api/venues ("node/123"…).
+  osm_ref?: string | null;
 }
 
 export interface FoodItem {
@@ -355,6 +358,99 @@ export async function nearbyVenues(lat: number, lng: number, limit = 5): Promise
   return res.venues;
 }
 
+// Headers for a session-required POST. Same convention as submitScan: web
+// rides the same-origin cookie (credentials:"include"); native forwards
+// the expoClient-stored cookie explicitly plus the app marker header. The
+// auth import is lazy — auth.ts reads API_BASE at module init, so a
+// top-level import here would be a circular dependency.
+async function sessionPostHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (Platform.OS !== "web") {
+    if (API_BASE.startsWith("/")) {
+      throw new Error(
+        "EXPO_PUBLIC_API_URL is not set — native builds need the deployed worker API URL.",
+      );
+    }
+    headers["X-Laparku-Client"] = "app";
+    const { getAuthCookie } = await import("./auth");
+    const cookie = await getAuthCookie();
+    if (cookie) headers.cookie = cookie;
+  }
+  return headers;
+}
+
+async function errorMessage(res: Response, fallback: string): Promise<Error> {
+  let message = `${fallback} (${res.status})`;
+  try {
+    const errBody = (await res.json()) as { error?: string };
+    if (errBody.error) message = errBody.error;
+  } catch {
+    // non-JSON error body — keep the status-based message
+  }
+  return new Error(message);
+}
+
+// GET /api/venues/osm-search — Nominatim-backed real-world place search,
+// normalized server-side (src/lib/osm.ts). lat/lng bound the search to
+// ~0.5° around the picker pin; omit for a global query.
+export interface OsmPlace {
+  osm_type: string;
+  osm_id: number;
+  name: string;
+  class: string;
+  type: string;
+  lat: number;
+  lng: number;
+  display_name: string;
+  address?: Record<string, string>;
+}
+
+export async function osmSearch(q: string, lat?: number, lng?: number): Promise<OsmPlace[]> {
+  const params = new URLSearchParams({ q });
+  if (lat !== undefined && lng !== undefined) {
+    params.set("lat", String(lat));
+    params.set("lng", String(lng));
+  }
+  const res = await apiFetch<{ places: OsmPlace[] }>(`/venues/osm-search?${params}`);
+  return res.places;
+}
+
+// GET /api/venues/osm-reverse — name suggestion for a dropped map pin.
+// {} when nothing resolves there (or OSM is unreachable).
+export interface OsmReverseResult {
+  name?: string;
+  address?: string;
+}
+
+export function osmReverse(lat: number, lng: number): Promise<OsmReverseResult> {
+  return apiFetch(`/venues/osm-reverse?lat=${lat}&lng=${lng}`);
+}
+
+// POST /api/venues — trusted venue creation from an OSM pick or a pin
+// drop. Dedup server-side (osm_ref, then same-name-within-~50m) returns
+// the existing venue with a 200 — both statuses carry {venue}.
+export interface CreateVenueBody {
+  name: string;
+  type?: (typeof VENUE_TYPES)[number];
+  area?: (typeof AREAS)[number];
+  address?: string;
+  lat: number;
+  lng: number;
+  osm_ref?: string;
+}
+
+export async function createVenue(body: CreateVenueBody): Promise<Venue> {
+  const res = await fetch(`${API_BASE}/venues`, {
+    method: "POST",
+    headers: await sessionPostHeaders(),
+    body: JSON.stringify(body),
+    credentials: "include",
+  });
+  if (!res.ok) throw await errorMessage(res, "couldn't create the venue");
+  const data = (await res.json()) as { venue: Venue };
+  return data.venue;
+}
+
 // One resolved batch item for POST /api/submissions/scan. `source_tags`
 // carries the lookup's provider names — the server's trust gate only
 // trusted-publishes codes with a `found` row in product_lookup_cache, so an
@@ -382,41 +478,19 @@ export interface ScanSubmitResult {
 
 // POST /api/submissions/scan — session-gated JSON batch intake. Same header
 // convention as the photo-form submit: web rides the same-origin cookie;
-// native forwards the expoClient-stored cookie explicitly. The auth import
-// is lazy — auth.ts reads API_BASE at module init, so a top-level import
-// here would be a circular dependency.
+// native forwards the expoClient-stored cookie explicitly (see
+// sessionPostHeaders above).
 export async function submitScan(body: {
   venue_id: string;
   provenance: string;
   items: ScanSubmitItem[];
 }): Promise<ScanSubmitResult> {
-  const headers: Record<string, string> = { "content-type": "application/json" };
-  if (Platform.OS !== "web") {
-    if (API_BASE.startsWith("/")) {
-      throw new Error(
-        "EXPO_PUBLIC_API_URL is not set — native builds need the deployed worker API URL.",
-      );
-    }
-    headers["X-Laparku-Client"] = "app";
-    const { getAuthCookie } = await import("./auth");
-    const cookie = await getAuthCookie();
-    if (cookie) headers.cookie = cookie;
-  }
   const res = await fetch(`${API_BASE}/submissions/scan`, {
     method: "POST",
-    headers,
+    headers: await sessionPostHeaders(),
     body: JSON.stringify(body),
     credentials: "include",
   });
-  if (!res.ok) {
-    let message = `scan submission failed (${res.status})`;
-    try {
-      const errBody = (await res.json()) as { error?: string };
-      if (errBody.error) message = errBody.error;
-    } catch {
-      // non-JSON error body — keep the status-based message
-    }
-    throw new Error(message);
-  }
+  if (!res.ok) throw await errorMessage(res, "scan submission failed");
   return res.json() as Promise<ScanSubmitResult>;
 }

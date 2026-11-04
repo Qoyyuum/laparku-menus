@@ -1,0 +1,1 @@
+ALTER TABLE `venues` ADD `osm_ref` text;
