@@ -78,10 +78,23 @@ async function seedCheckin(userId: string, venueId: string, createdAt?: Date) {
 
 // Same raw-column convention as leaderboards.test.ts — the better-auth
 // `user` table is untracked by drizzle.
-async function setPrefs(userId: string, prefs: { display_name?: string | null; show_on_leaderboard?: boolean }) {
-  if (prefs.display_name !== undefined) {
-    await env.DB.prepare(`UPDATE "user" SET display_name = ? WHERE id = ?`)
-      .bind(prefs.display_name, userId)
+async function setPrefs(
+  userId: string,
+  prefs: { public_name?: string | null; show_on_leaderboard?: boolean },
+) {
+  if (prefs.public_name !== undefined) {
+    const accounts = prefs.public_name
+      ? JSON.stringify([
+          {
+            platform: "instagram",
+            label: "Instagram",
+            handle: prefs.public_name,
+            url: `https://instagram.com/${prefs.public_name}`,
+          },
+        ])
+      : null;
+    await env.DB.prepare(`UPDATE "user" SET preferred_social = ?, gravatar_accounts = ? WHERE id = ?`)
+      .bind(prefs.public_name ? "instagram" : null, accounts, userId)
       .run();
   }
   if (prefs.show_on_leaderboard !== undefined) {
@@ -158,8 +171,8 @@ it("pioneer_belait belongs to the earliest Belait event; the second arrival neve
   expect(lateBadges["first_dish"]).toMatchObject({ earned: true });
 
   // Through the public endpoint the same holds for opted-in users.
-  await setPrefs(early.userId, { display_name: "Early", show_on_leaderboard: true });
-  await setPrefs(late.userId, { display_name: "Late", show_on_leaderboard: true });
+  await setPrefs(early.userId, { public_name: "Early", show_on_leaderboard: true });
+  await setPrefs(late.userId, { public_name: "Late", show_on_leaderboard: true });
   const pubEarly = await publicBadges(early.userId);
   expect(pubEarly.res.status).toBe(200);
   expect(pubEarly.body.badges.map((b) => b.key)).toContain("pioneer_belait");
@@ -206,7 +219,7 @@ it("opt-out user's public badge endpoint is 404; their own /api/me/badges still 
   // Opt in → earned badges only, no progress on unearned ones. A display
   // name is set too so this user's board row isn't anonymous — keeps the
   // "Anonymous ⇒ no badge" assertion in the leaderboard test below clean.
-  await setPrefs(u.userId, { display_name: "BadgeOptedIn", show_on_leaderboard: true });
+  await setPrefs(u.userId, { public_name: "BadgeOptedIn", show_on_leaderboard: true });
   const pub = await publicBadges(u.userId);
   expect(pub.res.status).toBe(200);
   expect(pub.body.badges.length).toBeGreaterThan(0);
@@ -247,7 +260,7 @@ it("admins award honorary badges; non-admins 403; unknown keys and duplicates re
 it("leaderboard rows carry each opted-in user's highest-tier badge key", async () => {
   const u = await forgeSession("submitter");
   const shy = await forgeSession("submitter");
-  await setPrefs(u.userId, { display_name: "BadgeHolder", show_on_leaderboard: true });
+  await setPrefs(u.userId, { public_name: "BadgeHolder", show_on_leaderboard: true });
   await seedSubmission(u.userId, "approved");
   await seedSubmission(u.userId, "approved");
   // Opted-out contributor: their row must not leak a badge.
