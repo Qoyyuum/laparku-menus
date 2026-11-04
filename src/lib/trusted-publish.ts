@@ -1,8 +1,9 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
-import { food_items, submissions, submitters, venues, type Submitter } from "../db/schema";
+import { food_items, product_lookup_cache, submissions, submitters, venues, type Submitter } from "../db/schema";
 import { resolveSubmitter } from "../routes/submissions";
 import { recordVerification } from "./freshness";
+import { normalizeBarcode } from "./product-lookup";
 import { PublishError } from "./publish";
 
 // Blast-radius cap for the trusted path (spec §5, plan Global Constraints):
@@ -27,9 +28,11 @@ export interface ScanItem {
 }
 
 export interface ScanPublishResult {
-  // The trusted_published submission when ≥1 item went live, else the
-  // pending_review overflow submission, else null (every item was stale).
+  // The trusted_published submission when ≥1 item went live, else null.
   submission_id: string | null;
+  // The pending_review submission created for over-cap / unverifiable
+  // items, else null — lets the client say "N queued for review".
+  review_submission_id: string | null;
   published: number;
   queued: number;
   // Re-scans of barcodes already is_current at this venue: no duplicate
@@ -64,7 +67,11 @@ export async function trustedPublishScan(
   db: Db,
   input: { userId: string; venueId: string; provenance: string; items: ScanItem[] },
 ): Promise<ScanPublishResult> {
-  const { userId, venueId, provenance, items } = input;
+  const { userId, venueId, provenance } = input;
+  // Normalize barcodes once at intake — the dedup set, the lookup-cache
+  // check, the merge matcher and the stored column all compare the same
+  // form, so " 123" and "123" can't bypass dedup into duplicate rows.
+  const items = input.items.map((i) => ({ ...i, barcode: i.barcode.trim() }));
   const now = new Date();
   const dayStart = utcDayStart(now);
 
@@ -88,7 +95,7 @@ export async function trustedPublishScan(
     for (const r of rows) if (r.barcode) current.add(r.barcode);
   }
 
-  const publishable: ScanItem[] = [];
+  const candidates: ScanItem[] = [];
   const seen = new Set<string>();
   let stale = 0;
   for (const item of items) {
@@ -97,8 +104,42 @@ export async function trustedPublishScan(
     if (current.has(item.barcode) || seen.has(item.barcode)) stale += 1;
     else {
       seen.add(item.barcode);
-      publishable.push(item);
+      candidates.push(item);
     }
+  }
+
+  // Trust gate: an item may skip review only if a provider actually
+  // vouched for the code — it must declare ≥1 source tag AND the lookup
+  // chain must have a `found` cache row for the barcode. Declaring tags
+  // alone isn't enough (a client could claim "openfoodfacts" for
+  // anything); the cache row is server-side proof the chain saw the code.
+  // The check runs against the code's normalized candidates (canonical
+  // form + UPC-E expansion) — a GTIN-14 scan verifies against the UPC-A
+  // the chain cached. Items failing either check aren't rejected — they
+  // queue for review.
+  const cacheKeysOf = (barcode: string): string[] =>
+    normalizeBarcode(barcode)?.candidates ?? [barcode];
+  const foundCodes = new Set<string>();
+  const allKeys = [...new Set(candidates.flatMap((i) => cacheKeysOf(i.barcode)))];
+  for (let off = 0; off < allKeys.length; off += 90) {
+    const rows = await db
+      .select({ code: product_lookup_cache.code })
+      .from(product_lookup_cache)
+      .where(
+        and(
+          eq(product_lookup_cache.found, true),
+          inArray(product_lookup_cache.code, allKeys.slice(off, off + 90)),
+        ),
+      );
+    for (const r of rows) foundCodes.add(r.code);
+  }
+
+  const publishable: ScanItem[] = [];
+  const overflow: ScanItem[] = [];
+  for (const item of candidates) {
+    const verified = item.source_tags.length > 0 && cacheKeysOf(item.barcode).some((k) => foundCodes.has(k));
+    if (verified) publishable.push(item);
+    else overflow.push(item);
   }
 
   const { submitter, error } = await resolveSubmitter(db, { authUserId: userId });
@@ -106,11 +147,11 @@ export async function trustedPublishScan(
 
   let trustedId: string | null = null;
   let published = 0;
-  const overflow: ScanItem[] = [];
   if (publishable.length > 0) {
     trustedId = crypto.randomUUID();
     // Created up-front so items can reference it; removed below if the
-    // daily cap ate the whole batch.
+    // daily cap ate the whole batch. scan_barcode is the first code that
+    // will actually publish — the batch head may have been stale.
     await db.insert(submissions).values({
       id: trustedId,
       submitter_id: submitter?.id ?? null,
@@ -120,7 +161,7 @@ export async function trustedPublishScan(
       image_keys: [],
       auto_flags: [],
       status: "trusted_published",
-      scan_barcode: items[0]!.barcode,
+      scan_barcode: publishable[0]!.barcode,
       publish_mode: "trusted",
     });
 
@@ -173,13 +214,17 @@ export async function trustedPublishScan(
       source_type: "barcode",
       provenance,
       image_keys: [],
-      // Over-cap items keep their scan payload so reviewers see exactly
-      // what would have published (source_tags ride along for provenance).
-      raw_extraction: { items: overflow },
+      // Over-cap and unverifiable items keep their scan payload so
+      // reviewers see exactly what would have published. item_type is set
+      // explicitly — approve-time validation defaults a missing item_type
+      // to "dish", which a scanned product is not. publish_mode stays NULL:
+      // these items haven't reached the menu yet, so there is no mode.
+      raw_extraction: {
+        items: overflow.map((i) => ({ item_type: "product", ...i })),
+      },
       auto_flags: [],
       status: "pending_review",
       scan_barcode: overflow[0]!.barcode,
-      publish_mode: "reviewed",
     });
   }
 
@@ -212,8 +257,8 @@ export async function trustedPublishScan(
   }
 
   // Reputation bookkeeping: each submission row counts once; the trusted
-  // publish counts as an approval (its items are live) while the over-cap
-  // queue submission is just filed.
+  // publish counts as an approval (its items are live) while the queue
+  // submission is just filed.
   if (submitter) {
     const submissionRows = (trustedId ? 1 : 0) + (queuedId ? 1 : 0);
     if (submissionRows > 0) {
@@ -222,7 +267,8 @@ export async function trustedPublishScan(
   }
 
   return {
-    submission_id: trustedId ?? queuedId,
+    submission_id: trustedId,
+    review_submission_id: queuedId,
     published,
     queued: overflow.length,
     stale_lookup: stale,

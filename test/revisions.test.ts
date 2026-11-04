@@ -92,6 +92,30 @@ it("matchItems leaves drafts unmatched when no existing item shares the name", (
   expect(sug).toEqual({ draftIndex: 0, existingItemId: null });
 });
 
+it("matchItems: exact barcode equality outranks normalized-name+price", () => {
+  const nameHit = { ...fakeItem("Nasi Katok", 1.5), barcode: "999" } as FoodItem;
+  const barcodeHit = { ...fakeItem("Teh Tarik", 9.9), barcode: "8888" } as FoodItem;
+  // The draft's name+price would match nameHit — but its barcode exactly
+  // matches barcodeHit, and a scanned code identifies the product exactly.
+  const [sug] = matchItems(
+    [{ name: "Nasi Katok", price_bnd: 1.5, item_type: "product", barcode: "8888" }],
+    [nameHit, barcodeHit],
+  );
+  expect(sug).toEqual({ draftIndex: 0, existingItemId: barcodeHit.id });
+
+  // Whitespace around the code doesn't matter; a digit different is a miss.
+  const [trimmed] = matchItems(
+    [{ name: "Ambuyat", item_type: "product", barcode: "  8888  " }],
+    [barcodeHit],
+  );
+  expect(trimmed).toEqual({ draftIndex: 0, existingItemId: barcodeHit.id });
+  const [miss] = matchItems(
+    [{ name: "Ambuyat", item_type: "product", barcode: "8889" }],
+    [barcodeHit],
+  );
+  expect(miss).toEqual({ draftIndex: 0, existingItemId: null });
+});
+
 // --- replace mode (v1 semantics) ----------------------------------------------
 
 it("replace mode supersedes the old menu and keeps only the new items current", async () => {

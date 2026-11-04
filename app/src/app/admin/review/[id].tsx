@@ -41,13 +41,19 @@ function toDraft(item: EditableItem): DraftItem {
   return { ...rest, price_bnd: Number.isFinite(price) ? price : undefined };
 }
 
-// Mirror of src/lib/match.ts (the app can't import worker code) — same
-// normalized-name + 20%-price heuristic the merge UI labels with.
+// Mirror of src/lib/match.ts (the app can't import worker code) — barcode
+// equality first (exact, strongest signal), then the same normalized-name +
+// 20%-price heuristic the merge UI labels with.
 function normalizeName(name: string): string {
   return name.normalize("NFKC").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
 function suggestedMatch(draft: EditableItem, existing: FoodItem[]): FoodItem | null {
+  const barcode = draft.barcode?.trim() ?? "";
+  if (barcode) {
+    const hit = existing.find((i) => i.barcode != null && i.barcode.trim() === barcode);
+    if (hit) return hit;
+  }
   const key = normalizeName(draft.name);
   const price = toDraft(draft).price_bnd;
   let best: FoodItem | null = null;

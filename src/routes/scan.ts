@@ -18,13 +18,17 @@ const SCAN_ROLES = ["submitter", "reviewer", "admin"];
 // Server-side re-validation of the app-resolved scan payload (spec §3:
 // the app submits lookup results; the worker never trusts their shape).
 const scanItemSchema = z.object({
-  barcode: z.string().min(1).max(64),
+  // Trimming happens here at intake — the dedup set, lookup-cache check and
+  // stored value all compare the normalized form (whitespace-only → 400).
+  barcode: z.string().trim().min(1).max(64),
   name: z.string().min(1).max(500),
   brand: z.string().max(200).optional(),
   package_size: z.string().max(100).optional(),
   nutrition_estimate: z.record(z.string(), z.unknown()).optional(),
-  // Which lookup providers supplied this item's data — required (an empty
-  // array is legal: the submitter typed it, but the key must exist).
+  // Which lookup providers supplied this item's data. The key is required;
+  // [] parses fine but can never pass the trusted-publish gate (a provider
+  // must have actually seen the code — see trustedPublishScan), so such
+  // items queue for review rather than publish.
   source_tags: z.array(z.string().min(1).max(64)).max(20),
 });
 const scanSchema = z.object({

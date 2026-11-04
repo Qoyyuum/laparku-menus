@@ -2,7 +2,7 @@ import { env, SELF } from "cloudflare:test";
 import { and, eq, sql } from "drizzle-orm";
 import { expect, it } from "vitest";
 import { getDb } from "../src/db/client";
-import { food_items, submissions, venues } from "../src/db/schema";
+import { food_items, product_lookup_cache, submissions, venues } from "../src/db/schema";
 import { forgeSession } from "./helpers/auth";
 
 const db = () => getDb(env);
@@ -29,15 +29,47 @@ function scanItem(overrides: Record<string, unknown> = {}) {
     package_size: "100g",
     source_tags: ["openfoodfacts"],
     ...overrides,
-  };
+  } as { barcode: string; name: string; source_tags: string[] } & Record<string, unknown>;
 }
 
-function scan(body: unknown, cookie?: string) {
+interface ScanBody {
+  venue_id?: string;
+  provenance?: string;
+  items?: { barcode?: string; name?: string }[];
+}
+
+// POSTs the batch. Unless seedCache:false, every item's barcode is first
+// seeded into product_lookup_cache as a found OFF hit — mirroring the real
+// flow, where the app only submits items its /api/products/lookup resolved.
+async function scan(body: ScanBody, cookie?: string, { seedCache = true } = {}) {
+  if (seedCache && Array.isArray(body?.items)) {
+    for (const it of body.items) {
+      if (!it?.barcode) continue;
+      await db()
+        .insert(product_lookup_cache)
+        .values({
+          code: String(it.barcode).trim(),
+          merged_payload: { name: it.name ?? "?" },
+          sources: [{ provider: "openfoodfacts" }],
+          found: true,
+          fetched_at: new Date(),
+        })
+        .onConflictDoNothing();
+    }
+  }
   return SELF.fetch("https://x/api/submissions/scan", {
     method: "POST",
     headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) },
     body: JSON.stringify(body ?? {}),
   });
+}
+
+interface ScanResult {
+  submission_id: string | null;
+  review_submission_id: string | null;
+  published: number;
+  queued: number;
+  stale_lookup: number;
 }
 
 // --- session gate ------------------------------------------------------------
@@ -57,18 +89,14 @@ it("found items publish trusted: submission + live pending_verification items", 
 
   const res = await scan({ venue_id: venue.id, provenance: "Scanned at shop", items }, cookie);
   expect(res.status).toBe(201);
-  const body = (await res.json()) as {
-    submission_id: string;
-    published: number;
-    queued: number;
-    stale_lookup: number;
-  };
+  const body = (await res.json()) as ScanResult;
   expect(body.published).toBe(2);
   expect(body.queued).toBe(0);
   expect(body.stale_lookup).toBe(0);
   expect(body.submission_id).toBeTruthy();
+  expect(body.review_submission_id).toBeNull();
 
-  const [sub] = await db().select().from(submissions).where(eq(submissions.id, body.submission_id));
+  const [sub] = await db().select().from(submissions).where(eq(submissions.id, body.submission_id!));
   expect(sub).toBeTruthy();
   expect(sub!.status).toBe("trusted_published");
   expect(sub!.publish_mode).toBe("trusted");
@@ -95,6 +123,59 @@ it("found items publish trusted: submission + live pending_verification items", 
   expect(byBarcode.get(items[0]!.barcode)?.off_barcode).toBe(items[0]!.barcode);
 });
 
+// --- trust gate: no provider provenance or no cache hit → review queue ---------
+
+it("source_tags:[] routes the item to pending_review even with a cache hit", async () => {
+  const venue = await seedVenue();
+  const { cookie } = await forgeSession("submitter");
+  // Cache-seeded (scan() seeds it) but no provider tags — nothing verified it.
+  const res = await scan(
+    { venue_id: venue.id, provenance: "s", items: [scanItem({ source_tags: [] })] },
+    cookie,
+  );
+  const body = (await res.json()) as ScanResult;
+  expect(body.published).toBe(0);
+  expect(body.queued).toBe(1);
+  expect(body.review_submission_id).toBeTruthy();
+
+  const live = await db().select().from(food_items).where(eq(food_items.venue_id, venue.id));
+  expect(live).toHaveLength(0);
+});
+
+it("a barcode with no product_lookup_cache hit routes to pending_review", async () => {
+  const venue = await seedVenue();
+  const { cookie } = await forgeSession("submitter");
+  const res = await scan(
+    { venue_id: venue.id, provenance: "s", items: [scanItem()] },
+    cookie,
+    { seedCache: false }, // tags claim OFF but the chain never saw this code
+  );
+  const body = (await res.json()) as ScanResult;
+  expect(body.published).toBe(0);
+  expect(body.queued).toBe(1);
+
+  const live = await db().select().from(food_items).where(eq(food_items.venue_id, venue.id));
+  expect(live).toHaveLength(0);
+});
+
+it("a cache-miss (found:false) barcode also fails the gate", async () => {
+  const venue = await seedVenue();
+  const { cookie } = await forgeSession("submitter");
+  const item = scanItem();
+  // The chain looked this code up and found nothing.
+  await db().insert(product_lookup_cache).values({
+    code: item.barcode,
+    merged_payload: {},
+    sources: [],
+    found: false,
+    fetched_at: new Date(),
+  });
+  const res = await scan({ venue_id: venue.id, provenance: "s", items: [item] }, cookie);
+  const body = (await res.json()) as ScanResult;
+  expect(body.published).toBe(0);
+  expect(body.queued).toBe(1);
+});
+
 // --- Review Focus #1: same-venue+barcode is_current → freshness bump ----------
 
 it("a re-scan of a barcode already current at the venue bumps freshness, no duplicate", async () => {
@@ -103,18 +184,22 @@ it("a re-scan of a barcode already current at the venue bumps freshness, no dupl
   const item = scanItem();
 
   const first = await scan({ venue_id: venue.id, provenance: "s1", items: [item] }, cookie);
-  const firstBody = (await first.json()) as { published: number };
+  const firstBody = (await first.json()) as ScanResult;
   expect(firstBody.published).toBe(1);
 
-  // Re-scan same venue+barcode plus a new one.
+  // Re-scan same venue+barcode plus a new one. The batch head is stale, so
+  // the submission's scan_barcode is the first *published* code.
+  const fresh = scanItem();
   const second = await scan(
-    { venue_id: venue.id, provenance: "s2", items: [scanItem({ barcode: item.barcode }), scanItem()] },
+    { venue_id: venue.id, provenance: "s2", items: [scanItem({ barcode: item.barcode }), fresh] },
     cookie,
   );
   expect(second.status).toBe(201);
-  const body = (await second.json()) as { published: number; stale_lookup: number };
+  const body = (await second.json()) as ScanResult;
   expect(body.stale_lookup).toBe(1);
   expect(body.published).toBe(1);
+  const [sub2] = await db().select().from(submissions).where(eq(submissions.id, body.submission_id!));
+  expect(sub2!.scan_barcode).toBe(fresh.barcode);
 
   // No duplicate: still exactly one item carrying that barcode at the venue.
   const dups = await db()
@@ -128,6 +213,28 @@ it("a re-scan of a barcode already current at the venue bumps freshness, no dupl
   expect(v!.last_verified_at!.getTime()).toBeGreaterThan(Date.now() - 60_000);
 });
 
+it("barcode normalization: whitespace variants dedup instead of duplicating", async () => {
+  const venue = await seedVenue();
+  const { cookie } = await forgeSession("submitter");
+  const item = scanItem();
+  await scan({ venue_id: venue.id, provenance: "s1", items: [item] }, cookie);
+
+  const res = await scan(
+    { venue_id: venue.id, provenance: "s2", items: [scanItem({ barcode: `  ${item.barcode} ` })] },
+    cookie,
+  );
+  const body = (await res.json()) as ScanResult;
+  expect(body.stale_lookup).toBe(1);
+  expect(body.published).toBe(0);
+
+  const rows = await db()
+    .select()
+    .from(food_items)
+    .where(eq(food_items.venue_id, venue.id));
+  expect(rows).toHaveLength(1);
+  expect(rows[0]!.barcode).toBe(item.barcode);
+});
+
 // --- Review Focus #3: 100 items/user/day cap → overflow pending_review ---------
 
 it("items beyond the 100/day cap fall back to a pending_review submission", { timeout: 30000 }, async () => {
@@ -137,9 +244,11 @@ it("items beyond the 100/day cap fall back to a pending_review submission", { ti
 
   const res = await scan({ venue_id: venue.id, provenance: "shelf sweep", items }, cookie);
   expect(res.status).toBe(201);
-  const body = (await res.json()) as { published: number; queued: number };
+  const body = (await res.json()) as ScanResult;
   expect(body.published).toBe(100);
   expect(body.queued).toBe(5);
+  expect(body.submission_id).toBeTruthy();
+  expect(body.review_submission_id).toBeTruthy();
 
   // The 100 went live; the 5 wait in a normal pending_review submission.
   const live = await db()
@@ -151,16 +260,22 @@ it("items beyond the 100/day cap fall back to a pending_review submission", { ti
   const [queued] = await db()
     .select()
     .from(submissions)
-    .where(and(eq(submissions.user_id, userId), eq(submissions.status, "pending_review")));
+    .where(eq(submissions.id, body.review_submission_id!));
   expect(queued).toBeTruthy();
-  expect(queued!.publish_mode).toBe("reviewed");
-  expect(queued!.raw_extraction?.items).toHaveLength(5);
+  expect(queued!.user_id).toBe(userId);
+  // Nothing reached the menu through this row yet — publish_mode is NULL.
+  expect(queued!.publish_mode).toBeNull();
+  const queuedItems = queued!.raw_extraction?.items as { item_type?: string }[];
+  expect(queuedItems).toHaveLength(5);
+  // Approve-time default is "dish" — scan overflow must carry "product".
+  expect(queuedItems.every((i) => i.item_type === "product")).toBe(true);
 
   // A follow-up batch queues entirely — the daily budget is spent.
   const res2 = await scan({ venue_id: venue.id, provenance: "more", items: [scanItem()] }, cookie);
-  const body2 = (await res2.json()) as { published: number; queued: number };
+  const body2 = (await res2.json()) as ScanResult;
   expect(body2.published).toBe(0);
   expect(body2.queued).toBe(1);
+  expect(body2.submission_id).toBeNull();
 });
 
 // --- Review Focus #5: items are never silently dropped -------------------------
@@ -179,7 +294,7 @@ it("every submitted item lands somewhere: published, queued, or counted stale", 
     },
     cookie,
   );
-  const body = (await res.json()) as { published: number; queued: number; stale_lookup: number };
+  const body = (await res.json()) as ScanResult;
   expect(body.published + body.queued + body.stale_lookup).toBe(3);
 });
 
@@ -208,6 +323,10 @@ it("rejects malformed bodies with 400", async () => {
   ).toBe(400);
   expect((await scan({ provenance: "x", items: [scanItem()] }, cookie)).status).toBe(400);
   expect((await scan({ venue_id: venue.id, items: [scanItem()] }, cookie)).status).toBe(400);
+  // Whitespace-only barcodes trim to empty → rejected, never stored.
+  expect(
+    (await scan({ venue_id: venue.id, provenance: "x", items: [scanItem({ barcode: "   " })] }, cookie)).status,
+  ).toBe(400);
 });
 
 it("scan onto an unknown venue 404s", async () => {
@@ -235,4 +354,17 @@ it("GET /api/venues/:id/items exposes pending_verification and barcode", async (
   const found = body.items.find((i) => i.barcode === item.barcode);
   expect(found).toBeTruthy();
   expect(found!.pending_verification).toBe(true);
+});
+
+// --- contribution counting (trusted_published counts as live content) ----------
+
+it("a trusted publish counts as an approved contribution on /api/me", async () => {
+  const venue = await seedVenue();
+  const { cookie } = await forgeSession("submitter");
+  await scan({ venue_id: venue.id, provenance: "s", items: [scanItem()] }, cookie);
+
+  const res = await SELF.fetch("https://x/api/me", { headers: { cookie } });
+  expect(res.status).toBe(200);
+  const body = (await res.json()) as { approved: number; submissions: number };
+  expect(body.approved).toBe(1);
 });

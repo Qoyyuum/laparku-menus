@@ -80,6 +80,10 @@ export interface FoodItem {
   tags: string[];
   nutrition_estimate: NutritionEstimate | null;
   brand: string | null;
+  barcode: string | null;
+  // True on trusted-published scan items until a reviewer verifies —
+  // the app renders the "recently scanned" badge off this.
+  pending_verification: boolean;
   // Contributor credit (Task 7): the sourcing submitter's display_name —
   // present only when that user opted in via show_credit; absent otherwise.
   contributed_by?: string;

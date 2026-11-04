@@ -51,7 +51,7 @@ function countedSource(kind: Kind): CountedSource {
       from: sql`FROM submissions AS c
         LEFT JOIN venue_revisions AS r ON r.submission_id = c.id
         LEFT JOIN venues AS v ON v.id = r.venue_id`,
-      conds: [sql`c.status = 'approved'`, sql`c.user_id IS NOT NULL`],
+      conds: [sql`c.status IN ('approved','trusted_published')`, sql`c.user_id IS NOT NULL`],
     };
   }
   const table = kind === "checkins" ? sql`check_ins` : sql`verifications`;

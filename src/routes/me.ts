@@ -21,7 +21,7 @@ meApi.get("/me", requireAuth(ME_ROLES), async (c) => {
   const [counts] = (await db.all(sql`
     SELECT
       (SELECT count(*) FROM submissions WHERE user_id = ${userId}) AS submissions,
-      (SELECT count(*) FROM submissions WHERE user_id = ${userId} AND status = 'approved') AS approved,
+      (SELECT count(*) FROM submissions WHERE user_id = ${userId} AND status IN ('approved','trusted_published')) AS approved,
       (SELECT count(*) FROM check_ins WHERE user_id = ${userId}) AS checkins,
       (SELECT count(*) FROM verifications WHERE user_id = ${userId}) AS verifications
   `)) as { submissions: number; approved: number; checkins: number; verifications: number }[];

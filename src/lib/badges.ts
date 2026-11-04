@@ -18,7 +18,7 @@ export interface BadgeResult {
 // collectStatsMany in a fixed handful of aggregate queries (bounded work
 // per leaderboard row set — never N badges × M users queries).
 export interface UserBadgeStats {
-  approved: number; // submissions.status = 'approved'
+  approved: number; // submissions.status IN ('approved','trusted_published')
   checkins: number;
   checkinAreas: number; // distinct districts checked into
   stalls: number; // distinct type='stall' venues checked into
@@ -102,7 +102,7 @@ const PIONEER_EVENTS = sql`
   FROM submissions s
   JOIN venue_revisions r ON r.submission_id = s.id
   JOIN venues v ON v.id = r.venue_id
-  WHERE s.status = 'approved' AND s.user_id IS NOT NULL
+  WHERE s.status IN ('approved','trusted_published') AND s.user_id IS NOT NULL
   UNION ALL
   SELECT v.area AS area, c.user_id AS user_id, c.created_at AS ts
   FROM check_ins c
@@ -196,7 +196,7 @@ export async function collectStatsMany(db: Db, userIds: string[]): Promise<Map<s
     await Promise.all([
       db.all(sql`
         SELECT user_id AS user_id, count(*) AS n FROM submissions
-        WHERE status = 'approved' AND user_id IN (${idList}) GROUP BY user_id
+        WHERE status IN ('approved','trusted_published') AND user_id IN (${idList}) GROUP BY user_id
       `) as Promise<{ user_id: string; n: number }[]>,
       db.all(sql`
         SELECT c.user_id AS user_id, count(*) AS n,

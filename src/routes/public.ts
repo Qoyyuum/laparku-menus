@@ -213,15 +213,16 @@ publicApi.get("/venues", async (c) => {
 
 // GET /api/stats — public site-wide totals for the about/landing surfaces:
 // published venues, current published items, distinct contributors (users
-// with at least one APPROVED submission — same "live content" meaning as the
-// contributions leaderboard; rejected/pending-only submitters don't count)
+// with at least one approved OR trusted_published submission — same "live
+// content" meaning as the contributions leaderboard; rejected/pending-only
+// submitters don't count)
 // and total check-ins. One round-trip via scalar subselects.
 publicApi.get("/stats", async (c) => {
   const [row] = (await getDb(c.env).all(sql`
     SELECT
       (SELECT count(*) FROM venues WHERE status = 'published') AS venues,
       (SELECT count(*) FROM food_items WHERE status = 'published' AND is_current = 1) AS items,
-      (SELECT count(DISTINCT user_id) FROM submissions WHERE user_id IS NOT NULL AND status = 'approved') AS contributors,
+      (SELECT count(DISTINCT user_id) FROM submissions WHERE user_id IS NOT NULL AND status IN ('approved','trusted_published')) AS contributors,
       (SELECT count(*) FROM check_ins) AS checkins
   `)) as { venues: number; items: number; contributors: number; checkins: number }[];
   return c.json({
