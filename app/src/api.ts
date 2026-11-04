@@ -87,8 +87,9 @@ export interface FoodItem {
   // True on trusted-published scan items until a reviewer verifies —
   // the app renders the "recently scanned" badge off this.
   pending_verification: boolean;
-  // Contributor credit (Task 7): the sourcing submitter's display_name —
-  // present only when that user opted in via show_credit; absent otherwise.
+  // Contributor credit (Task 7): the sourcing submitter's verified social
+  // handle (preferred_social) — present only when that user opted in via
+  // show_credit; absent otherwise. Freeform names never ride this field.
   contributed_by?: string;
 }
 
@@ -209,7 +210,7 @@ export type LeaderboardPeriod = (typeof LEADERBOARD_PERIODS)[number];
 
 export interface LeaderboardRow {
   rank: number;
-  // `display_name` for opted-in users, "Anonymous" otherwise.
+  // Verified social handle for opted-in users, "Anonymous" otherwise.
   name: string;
   count: number;
   // Highest-tier earned badge key — opted-in rows only, null otherwise.
@@ -298,10 +299,25 @@ export function badgeName(key: string): string {
 
 // GET /api/me — the signed-in caller's own counts plus their opt-in prefs
 // (the same fields PATCH /api/me writes).
+export type ThemePref = "light" | "dark" | "system";
+
+// A Gravatar-verified social account, normalized server-side
+// (src/lib/gravatar.ts) — the only kind of public name we show.
+export interface VerifiedAccount {
+  platform: string;
+  label: string;
+  handle: string;
+  url: string;
+}
+
 export interface MeProfile {
   display_name: string | null;
   show_on_leaderboard: boolean;
   show_credit: boolean;
+  theme: ThemePref;
+  preferred_social: string | null;
+  socials: VerifiedAccount[];
+  avatar_url: string;
   submissions: number;
   approved: number;
   checkins: number;

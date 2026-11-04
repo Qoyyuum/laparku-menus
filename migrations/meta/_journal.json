@@ -43,6 +43,13 @@
       "when": 1793779355706,
       "tag": "0005_osm_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1793782430659,
+      "tag": "0006_passkeys_profiles",
+      "breakpoints": true
     }
   ]
 }

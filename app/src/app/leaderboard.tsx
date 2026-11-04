@@ -81,11 +81,11 @@ export default function LeaderboardScreen() {
   }, [kind, period, area, refreshKey, session?.user?.id]);
 
   return (
-    <ScrollView className="flex-1 bg-neutral-50" contentContainerClassName="gap-4 p-4">
-      <Text className="text-xl font-bold text-neutral-900">Leaderboards</Text>
+    <ScrollView className="flex-1 bg-neutral-50 dark:bg-neutral-900" contentContainerClassName="gap-4 p-4">
+      <Text className="text-xl font-bold text-neutral-900 dark:text-neutral-100">Leaderboards</Text>
 
       <View className="gap-1.5">
-        <Text className="text-sm font-semibold text-neutral-800">Board</Text>
+        <Text className="text-sm font-semibold text-neutral-800 dark:text-neutral-100">Board</Text>
         <View className="flex-row flex-wrap gap-2">
           {LEADERBOARD_KINDS.map((k) => (
             <PickerChip key={k} label={KIND_LABELS[k]} active={kind === k} onPress={() => setKind(k)} />
@@ -94,7 +94,7 @@ export default function LeaderboardScreen() {
       </View>
 
       <View className="gap-1.5">
-        <Text className="text-sm font-semibold text-neutral-800">Period</Text>
+        <Text className="text-sm font-semibold text-neutral-800 dark:text-neutral-100">Period</Text>
         <View className="flex-row flex-wrap gap-2">
           {LEADERBOARD_PERIODS.map((p) => (
             <PickerChip key={p} label={PERIOD_LABELS[p]} active={period === p} onPress={() => setPeriod(p)} />
@@ -103,14 +103,14 @@ export default function LeaderboardScreen() {
       </View>
 
       <View className="gap-1.5">
-        <Text className="text-sm font-semibold text-neutral-800">Area</Text>
+        <Text className="text-sm font-semibold text-neutral-800 dark:text-neutral-100">Area</Text>
         <View className="flex-row flex-wrap gap-2">
           {AREA_CHOICES.map((a) => (
             <PickerChip key={a.label} label={a.label} active={area === a.value} onPress={() => setArea(a.value)} />
           ))}
         </View>
         {result?.area ? (
-          <Text className="text-xs text-neutral-500">Showing {result.area}</Text>
+          <Text className="text-xs text-neutral-500 dark:text-neutral-400">Showing {result.area}</Text>
         ) : null}
       </View>
 
@@ -130,11 +130,11 @@ export default function LeaderboardScreen() {
           <View
             key={`${r.rank}-${i}`}
             className={`flex-row items-center gap-3 rounded-lg border px-3 py-2 ${
-              result.me?.rank === r.rank ? "border-emerald-700 bg-emerald-50" : "border-neutral-200 bg-white"
+              result.me?.rank === r.rank ? "border-emerald-700 bg-emerald-50" : "border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800"
             }`}
           >
-            <Text className="w-8 text-base font-bold text-neutral-500">#{r.rank}</Text>
-            <Text className="flex-1 text-base text-neutral-900" numberOfLines={1}>
+            <Text className="w-8 text-base font-bold text-neutral-500 dark:text-neutral-400">#{r.rank}</Text>
+            <Text className="flex-1 text-base text-neutral-900 dark:text-neutral-100" numberOfLines={1}>
               {r.name}
             </Text>
             {/* Opted-in rows carry their highest-tier badge key (Task 8). */}
@@ -143,11 +143,11 @@ export default function LeaderboardScreen() {
                 <Text className="text-xs font-semibold text-amber-800">{badgeName(r.top_badge)}</Text>
               </View>
             ) : null}
-            <Text className="text-base font-semibold text-neutral-800">{r.count}</Text>
+            <Text className="text-base font-semibold text-neutral-800 dark:text-neutral-100">{r.count}</Text>
           </View>
         ))}
         {!loading && result && result.board.length === 0 ? (
-          <Text className="text-sm text-neutral-600">
+          <Text className="text-sm text-neutral-600 dark:text-neutral-300">
             Nobody on this board yet — be the first.
           </Text>
         ) : null}
@@ -162,20 +162,21 @@ function PickerChip({ label, active, onPress }: { label: string; active: boolean
   return (
     <Pressable
       className={`rounded-full border px-3 py-1.5 ${
-        active ? "border-emerald-700 bg-emerald-700" : "border-neutral-300 bg-white"
+        active ? "border-emerald-700 bg-emerald-700" : "border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800"
       }`}
       onPress={onPress}
     >
-      <Text className={`text-sm font-medium ${active ? "text-white" : "text-neutral-700"}`}>{label}</Text>
+      <Text className={`text-sm font-medium ${active ? "text-white" : "text-neutral-700 dark:text-neutral-300"}`}>{label}</Text>
     </Pressable>
   );
 }
 
-// The opt-in editor for the leaderboard prefs (PATCH /api/me): a display
-// name plus the show_on_leaderboard toggle. Names only render for opted-in
-// users — the default is "Anonymous".
+// The opt-in editor for the leaderboard prefs (PATCH /api/me): just the
+// show_on_leaderboard toggle. The public name is the user's preferred
+// Gravatar-verified social handle (picked on the Profile screen) — freeform
+// display names are gone. Everything without a verified handle renders
+// "Anonymous".
 function OptInCard({ onSaved }: { onSaved: () => void }) {
-  const [name, setName] = useState("");
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -186,10 +187,9 @@ function OptInCard({ onSaved }: { onSaved: () => void }) {
   // when signed in, so the request is authorized.
   useEffect(() => {
     let cancelled = false;
-    authedFetch<{ display_name: string | null; show_on_leaderboard: boolean }>("/me")
+    authedFetch<{ show_on_leaderboard: boolean }>("/me")
       .then((m) => {
         if (cancelled) return;
-        setName(m.display_name ?? "");
         setShow(m.show_on_leaderboard);
       })
       .catch(() => {});
@@ -205,7 +205,7 @@ function OptInCard({ onSaved }: { onSaved: () => void }) {
     try {
       await authedFetch("/me", {
         method: "PATCH",
-        body: JSON.stringify({ display_name: name.trim() || null, show_on_leaderboard: show }),
+        body: JSON.stringify({ show_on_leaderboard: show }),
       });
       setMessage("Saved.");
       onSaved();
@@ -217,27 +217,21 @@ function OptInCard({ onSaved }: { onSaved: () => void }) {
   }
 
   return (
-    <View className="gap-2 rounded-xl border border-neutral-200 bg-white p-4">
-      <Text className="text-base font-bold text-neutral-900">Your display settings</Text>
-      <Text className="text-sm leading-6 text-neutral-600">
-        Boards show “Anonymous” unless you opt in with a display name.
+    <View className="gap-2 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 p-4">
+      <Text className="text-base font-bold text-neutral-900 dark:text-neutral-100">Your display settings</Text>
+      <Text className="text-sm leading-6 text-neutral-600 dark:text-neutral-300">
+        Boards show “Anonymous” unless you opt in — then they show the verified
+        social handle you picked under Profile → Social accounts.
       </Text>
-      <TextInput
-        className="rounded-lg border border-neutral-300 px-3 py-2 text-base"
-        placeholder="Display name (e.g. Menu Hunter)"
-        maxLength={80}
-        value={name}
-        onChangeText={setName}
-      />
       <View className="flex-row items-center gap-2">
         <Switch value={show} onValueChange={setShow} />
-        <Text className="text-sm text-neutral-800">Show my name on leaderboards</Text>
+        <Text className="text-sm text-neutral-800 dark:text-neutral-100">Show my social handle on leaderboards</Text>
       </View>
       {error ? <Text className="text-sm text-red-600">{error}</Text> : null}
       {message ? <Text className="text-sm font-medium text-emerald-700">{message}</Text> : null}
       <Pressable
         className="items-center rounded-lg bg-emerald-700 px-4 py-2.5 disabled:opacity-50"
-        disabled={busy || (show && name.trim() === "")}
+        disabled={busy}
         onPress={save}
       >
         <Text className="text-base font-semibold text-white">{busy ? "Saving…" : "Save"}</Text>

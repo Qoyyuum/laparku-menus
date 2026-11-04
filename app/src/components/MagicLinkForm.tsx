@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
+import { Platform, Pressable, Text, TextInput, View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { authClient } from "../auth";
 
@@ -35,20 +35,42 @@ export function MagicLinkForm({
 
   return (
     <>
-      <Text className="text-lg font-bold text-neutral-900">{title}</Text>
+      <Text className="text-lg font-bold text-neutral-900 dark:text-neutral-100">{title}</Text>
       {subtitle && !sent ? (
-        <Text className="text-sm leading-5 text-neutral-600">{subtitle}</Text>
+        <Text className="text-sm leading-5 text-neutral-600 dark:text-neutral-300">{subtitle}</Text>
       ) : null}
       {notice ? <Text className="text-sm leading-5 text-amber-700">{notice}</Text> : null}
       {sent ? (
-        <Text className="text-sm leading-6 text-neutral-600">
+        <Text className="text-sm leading-6 text-neutral-600 dark:text-neutral-300">
           Check your email — we sent a sign-in link to {email}. Open it on this device to
           continue.
         </Text>
       ) : (
         <>
+          {Platform.OS === "web" ? (
+            <Pressable
+              className="items-center rounded-lg border border-emerald-700 px-4 py-2.5 disabled:opacity-50"
+              disabled={busy}
+              onPress={async () => {
+                setBusy(true);
+                setError(null);
+                // Cancellation/failure just returns here — the email form is
+                // already on screen, so nothing to recover.
+                const { error: err } = await authClient.signIn.passkey();
+                setBusy(false);
+                if (err) setError("Passkey didn't work — use the email link instead.");
+              }}
+            >
+              <Text className="text-base font-semibold text-emerald-700 dark:text-emerald-400">
+                {busy ? "…" : "Sign in with a passkey"}
+              </Text>
+            </Pressable>
+          ) : null}
+          {Platform.OS === "web" ? (
+            <Text className="text-center text-xs text-neutral-500 dark:text-neutral-400">or</Text>
+          ) : null}
           <TextInput
-            className="rounded-lg border border-neutral-300 px-3 py-2 text-base"
+            className="rounded-lg border border-neutral-300 dark:border-neutral-600 px-3 py-2 text-base"
             placeholder="you@example.com"
             autoCapitalize="none"
             autoComplete="email"

@@ -52,7 +52,7 @@ export function ContributeBanner() {
           </Pressable>
         </Link>
         <Link href="/coverage" asChild>
-          <Pressable className="flex-row items-center gap-1.5 rounded-lg border border-emerald-700 bg-white px-4 py-2.5">
+          <Pressable className="flex-row items-center gap-1.5 rounded-lg border border-emerald-700 bg-white dark:bg-neutral-800 px-4 py-2.5">
             <Ionicons name="map" color="#047857" size={16} />
             <Text className="text-sm font-semibold text-emerald-700">See coverage</Text>
           </Pressable>

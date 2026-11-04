@@ -4,8 +4,8 @@ const STYLES: Record<string, { bg: string; text: string }> = {
   "halal-certified": { bg: "bg-emerald-100", text: "text-emerald-800" },
   "muslim-owned": { bg: "bg-teal-100", text: "text-teal-800" },
   "non-halal": { bg: "bg-red-100", text: "text-red-800" },
-  unknown: { bg: "bg-neutral-200", text: "text-neutral-600" },
-  "n-a": { bg: "bg-neutral-100", text: "text-neutral-500" },
+  unknown: { bg: "bg-neutral-200 dark:bg-neutral-700", text: "text-neutral-600 dark:text-neutral-300" },
+  "n-a": { bg: "bg-neutral-100 dark:bg-neutral-800", text: "text-neutral-500 dark:text-neutral-400" },
 };
 
 export function HalalBadge({ status }: { status: string }) {

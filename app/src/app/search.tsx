@@ -50,7 +50,7 @@ export default function SearchScreen() {
   const venues = useMemo(() => result.venues, [result]);
 
   return (
-    <ScrollView className="flex-1 bg-neutral-50" contentContainerClassName="gap-4 p-4">
+    <ScrollView className="flex-1 bg-neutral-50 dark:bg-neutral-900" contentContainerClassName="gap-4 p-4">
       <SearchBar value={q} onChange={setQ} />
       <FilterBar
         filters={filters}
@@ -63,12 +63,12 @@ export default function SearchScreen() {
       {error ? <Text className="text-sm text-red-600">{error}</Text> : null}
 
       {!loading && !error && venues.length + items.length === 0 ? (
-        <Text className="py-8 text-center text-neutral-500">No matches. Try a different search or filter.</Text>
+        <Text className="py-8 text-center text-neutral-500 dark:text-neutral-400">No matches. Try a different search or filter.</Text>
       ) : null}
 
       {items.length > 0 ? (
         <View className="gap-2">
-          <Text className="text-xs font-semibold uppercase text-neutral-500">Menu items</Text>
+          <Text className="text-xs font-semibold uppercase text-neutral-500 dark:text-neutral-400">Menu items</Text>
           {items.map((item: FoodItem) => (
             <ItemCard key={item.id} item={item} venue={venueMap.get(item.venue_id)} />
           ))}
@@ -77,7 +77,7 @@ export default function SearchScreen() {
 
       {venues.length > 0 ? (
         <View className="gap-2">
-          <Text className="text-xs font-semibold uppercase text-neutral-500">Venues</Text>
+          <Text className="text-xs font-semibold uppercase text-neutral-500 dark:text-neutral-400">Venues</Text>
           {venues.map((venue) => (
             <VenueCard key={venue.id} venue={venue} />
           ))}

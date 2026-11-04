@@ -29,10 +29,10 @@ function Chip({ label, active, onPress }: { label: string; active: boolean; onPr
     <Pressable
       onPress={onPress}
       className={`rounded-full border px-3 py-1.5 ${
-        active ? "border-emerald-700 bg-emerald-700" : "border-neutral-300 bg-white"
+        active ? "border-emerald-700 bg-emerald-700" : "border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800"
       }`}
     >
-      <Text className={`text-xs font-medium ${active ? "text-white" : "text-neutral-700"}`}>{label}</Text>
+      <Text className={`text-xs font-medium ${active ? "text-white" : "text-neutral-700 dark:text-neutral-300"}`}>{label}</Text>
     </Pressable>
   );
 }
@@ -44,7 +44,7 @@ export function FilterBar({ filters, onChange, groups }: Props) {
     <View className="gap-2">
       {visible.map((group) => (
         <View key={group.key} className="flex-row items-center gap-2">
-          <Text className="w-12 text-xs font-semibold uppercase text-neutral-500">{group.label}</Text>
+          <Text className="w-12 text-xs font-semibold uppercase text-neutral-500 dark:text-neutral-400">{group.label}</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerClassName="gap-2">
             {group.options.map((opt) => (
               <Chip

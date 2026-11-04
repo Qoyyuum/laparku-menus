@@ -4,6 +4,7 @@ import type { Env } from "./env";
 import { handleMcpRequest } from "./mcp";
 import { handleQueueBatch, type SubmissionMessage } from "./queue";
 import adminApi from "./routes/admin";
+import avatarApi from "./routes/avatar";
 import badgesApi from "./routes/badges";
 import checkinsApi from "./routes/checkins";
 import coverageApi from "./routes/coverage";
@@ -23,7 +24,9 @@ const app = new Hono<{ Bindings: Env }>();
 app.get("/api/health", (c) => c.json({ status: "ok" }));
 // better-auth handler — per-request instance because the D1 binding only
 // exists inside a request (see src/auth.ts).
-app.on(["GET", "POST"], "/api/auth/*", (c) => createAuth(c.env).handler(c.req.raw));
+app.on(["GET", "POST"], "/api/auth/*", (c) =>
+  createAuth(c.env, new URL(c.req.url).origin).handler(c.req.raw),
+);
 app.route("/api", publicApi);
 app.route("/api", submissionsApi);
 app.route("/api", flagsApi);
@@ -31,6 +34,7 @@ app.route("/api", verifyApi);
 app.route("/api", checkinsApi);
 app.route("/api", leaderboardsApi);
 app.route("/api", meApi);
+app.route("/api", avatarApi);
 app.route("/api", badgesApi);
 app.route("/api", coverageApi);
 app.route("/api", nearbyApi);

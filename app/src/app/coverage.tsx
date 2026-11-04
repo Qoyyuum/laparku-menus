@@ -47,9 +47,9 @@ export default function CoverageScreen() {
   }, [refreshKey]);
 
   return (
-    <ScrollView className="flex-1 bg-neutral-50" contentContainerClassName="gap-4 p-4">
-      <Text className="text-xl font-bold text-neutral-900">Coverage</Text>
-      <Text className="text-sm leading-6 text-neutral-600">
+    <ScrollView className="flex-1 bg-neutral-50 dark:bg-neutral-900" contentContainerClassName="gap-4 p-4">
+      <Text className="text-xl font-bold text-neutral-900 dark:text-neutral-100">Coverage</Text>
+      <Text className="text-sm leading-6 text-neutral-600 dark:text-neutral-300">
         What's mapped, where menus are still needed, and the missions filed by the community.
       </Text>
 
@@ -58,17 +58,17 @@ export default function CoverageScreen() {
 
       {/* Per-area rollup */}
       <View className="gap-1.5">
-        <Text className="text-sm font-semibold text-neutral-800">By area</Text>
+        <Text className="text-sm font-semibold text-neutral-800 dark:text-neutral-100">By area</Text>
         <View className="gap-2">
           {areas.map((a) => (
-            <View key={a.area} className="rounded-lg border border-neutral-200 bg-white px-3 py-2">
+            <View key={a.area} className="rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2">
               <View className="flex-row items-center justify-between">
-                <Text className="text-base font-semibold text-neutral-900">{a.area}</Text>
-                <Text className="text-xs text-neutral-500">
+                <Text className="text-base font-semibold text-neutral-900 dark:text-neutral-100">{a.area}</Text>
+                <Text className="text-xs text-neutral-500 dark:text-neutral-400">
                   {a.venues} venues · {a.items} items
                 </Text>
               </View>
-              <Text className="text-xs text-neutral-600">
+              <Text className="text-xs text-neutral-600 dark:text-neutral-300">
                 {a.stubs} menu{a.stubs === 1 ? "" : "s"} needed · {a.open_requests} open mission
                 {a.open_requests === 1 ? "" : "s"}
               </Text>
@@ -79,8 +79,8 @@ export default function CoverageScreen() {
 
       {/* "Menu needed" stubs */}
       <View className="gap-1.5">
-        <Text className="text-sm font-semibold text-neutral-800">Menu needed</Text>
-        <Text className="text-xs text-neutral-500">
+        <Text className="text-sm font-semibold text-neutral-800 dark:text-neutral-100">Menu needed</Text>
+        <Text className="text-xs text-neutral-500 dark:text-neutral-400">
           Stub venues — we know they exist, but nobody's menu has landed yet.
         </Text>
         <View className="gap-2">
@@ -90,10 +90,10 @@ export default function CoverageScreen() {
               className="flex-row items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2"
             >
               <View className="flex-1">
-                <Text className="text-base font-medium text-neutral-900" numberOfLines={1}>
+                <Text className="text-base font-medium text-neutral-900 dark:text-neutral-100" numberOfLines={1}>
                   {v.name}
                 </Text>
-                <Text className="text-xs text-neutral-600">
+                <Text className="text-xs text-neutral-600 dark:text-neutral-300">
                   {v.type} · {v.area}
                 </Text>
                 <Text className="text-xs font-semibold text-amber-700">⚑ menu needed</Text>
@@ -104,29 +104,29 @@ export default function CoverageScreen() {
             </View>
           ))}
           {!loading && stubs.length === 0 ? (
-            <Text className="text-sm text-neutral-600">No stubs — every known venue has a menu.</Text>
+            <Text className="text-sm text-neutral-600 dark:text-neutral-300">No stubs — every known venue has a menu.</Text>
           ) : null}
         </View>
       </View>
 
       {/* Open missions */}
       <View className="gap-1.5">
-        <Text className="text-sm font-semibold text-neutral-800">Open missions</Text>
-        <Text className="text-xs text-neutral-500">
+        <Text className="text-sm font-semibold text-neutral-800 dark:text-neutral-100">Open missions</Text>
+        <Text className="text-xs text-neutral-500 dark:text-neutral-400">
           Requests filed by the community. Filing a menu for one of these marks it fulfilled.
         </Text>
         <View className="gap-2">
           {requests.map((r) => (
             <View
               key={r.id}
-              className="flex-row items-center justify-between gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2"
+              className="flex-row items-center justify-between gap-2 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2"
             >
               <View className="flex-1">
-                <Text className="text-base font-medium text-neutral-900" numberOfLines={1}>
+                <Text className="text-base font-medium text-neutral-900 dark:text-neutral-100" numberOfLines={1}>
                   {r.venue_name ?? r.free_text_name ?? "—"}
                 </Text>
-                <Text className="text-xs text-neutral-600">{r.area}</Text>
-                {r.note ? <Text className="mt-1 text-xs italic text-neutral-500">“{r.note}”</Text> : null}
+                <Text className="text-xs text-neutral-600 dark:text-neutral-300">{r.area}</Text>
+                {r.note ? <Text className="mt-1 text-xs italic text-neutral-500 dark:text-neutral-400">“{r.note}”</Text> : null}
               </View>
               <Link href="/submit">
                 <Text className="text-xs font-semibold text-emerald-700">Capture this →</Text>
@@ -134,7 +134,7 @@ export default function CoverageScreen() {
             </View>
           ))}
           {!loading && requests.length === 0 ? (
-            <Text className="text-sm text-neutral-600">No open missions right now.</Text>
+            <Text className="text-sm text-neutral-600 dark:text-neutral-300">No open missions right now.</Text>
           ) : null}
         </View>
       </View>
@@ -179,12 +179,12 @@ function RequestForm({ signedIn, onFiled }: { signedIn: boolean; onFiled: () => 
   }
 
   return (
-    <View className="gap-2 rounded-xl border border-neutral-200 bg-white p-4">
-      <Text className="text-base font-bold text-neutral-900">Request a venue</Text>
+    <View className="gap-2 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 p-4">
+      <Text className="text-base font-bold text-neutral-900 dark:text-neutral-100">Request a venue</Text>
       {signedIn ? (
         <>
           <TextInput
-            className="rounded-lg border border-neutral-300 px-3 py-2 text-base"
+            className="rounded-lg border border-neutral-300 dark:border-neutral-600 px-3 py-2 text-base"
             placeholder="Venue name"
             maxLength={120}
             value={name}
@@ -195,18 +195,18 @@ function RequestForm({ signedIn, onFiled }: { signedIn: boolean; onFiled: () => 
               <Pressable
                 key={a}
                 className={`rounded-full border px-3 py-1.5 ${
-                  area === a ? "border-emerald-700 bg-emerald-700" : "border-neutral-300 bg-white"
+                  area === a ? "border-emerald-700 bg-emerald-700" : "border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800"
                 }`}
                 onPress={() => setArea(a)}
               >
-                <Text className={`text-sm font-medium ${area === a ? "text-white" : "text-neutral-700"}`}>
+                <Text className={`text-sm font-medium ${area === a ? "text-white" : "text-neutral-700 dark:text-neutral-300"}`}>
                   {a}
                 </Text>
               </Pressable>
             ))}
           </View>
           <TextInput
-            className="rounded-lg border border-neutral-300 px-3 py-2 text-base"
+            className="rounded-lg border border-neutral-300 dark:border-neutral-600 px-3 py-2 text-base"
             placeholder="Note (optional — e.g. where to find it)"
             maxLength={500}
             value={note}
@@ -221,12 +221,12 @@ function RequestForm({ signedIn, onFiled }: { signedIn: boolean; onFiled: () => 
           >
             <Text className="text-base font-semibold text-white">{busy ? "Filing…" : "File mission"}</Text>
           </Pressable>
-          <Text className="text-xs text-neutral-500">
+          <Text className="text-xs text-neutral-500 dark:text-neutral-400">
             Have the menu itself? <Link href="/submit" className="text-emerald-700">Submit it instead</Link>.
           </Text>
         </>
       ) : (
-        <Text className="text-sm text-neutral-500">Sign in to request a venue.</Text>
+        <Text className="text-sm text-neutral-500 dark:text-neutral-400">Sign in to request a venue.</Text>
       )}
     </View>
   );

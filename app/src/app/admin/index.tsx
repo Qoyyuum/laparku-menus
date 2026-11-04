@@ -28,14 +28,14 @@ function QueueRow({ sub }: { sub: QueueSubmission }) {
   const itemCount = sub.raw_extraction?.items?.length ?? 0;
   return (
     <Link href={`/admin/review/${sub.id}`} asChild>
-      <Pressable className="gap-1.5 rounded-xl border border-neutral-200 bg-white p-3 active:bg-neutral-50">
+      <Pressable className="gap-1.5 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 p-3 active:bg-neutral-50 dark:active:bg-neutral-900">
         <View className="flex-row items-center justify-between gap-2">
-          <Text className="flex-1 text-base font-semibold text-neutral-900" numberOfLines={1}>
+          <Text className="flex-1 text-base font-semibold text-neutral-900 dark:text-neutral-100" numberOfLines={1}>
             {guess?.name ?? "Unknown venue"}
           </Text>
           <ConfidenceBadge confidence={sub.confidence} />
         </View>
-        <Text className="text-xs text-neutral-600">
+        <Text className="text-xs text-neutral-600 dark:text-neutral-300">
           {sub.source_type} · {itemCount} item{itemCount === 1 ? "" : "s"} ·{" "}
           {new Date(sub.created_at).toLocaleDateString()} ·{" "}
           {sub.submitter_trust_tier ?? "anonymous"}
@@ -61,7 +61,7 @@ function FlagRow({ flag, onResolve }: { flag: ItemFlag; onResolve: (id: string) 
   return (
     <View className="gap-1.5 rounded-xl border border-red-200 bg-red-50 p-3">
       <View className="flex-row items-center justify-between gap-2">
-        <Text className="flex-1 text-base font-semibold text-neutral-900" numberOfLines={1}>
+        <Text className="flex-1 text-base font-semibold text-neutral-900 dark:text-neutral-100" numberOfLines={1}>
           {flag.item_name}
         </Text>
         <Pressable
@@ -82,10 +82,10 @@ function FlagRow({ flag, onResolve }: { flag: ItemFlag; onResolve: (id: string) 
           </Text>
         </Pressable>
       </View>
-      <Text className="text-xs text-neutral-600">{flag.venue_name}</Text>
-      <Text className="text-sm text-neutral-800">{flag.reason}</Text>
+      <Text className="text-xs text-neutral-600 dark:text-neutral-300">{flag.venue_name}</Text>
+      <Text className="text-sm text-neutral-800 dark:text-neutral-100">{flag.reason}</Text>
       {flag.reporter_contact ? (
-        <Text className="text-xs text-neutral-500">reporter: {flag.reporter_contact}</Text>
+        <Text className="text-xs text-neutral-500 dark:text-neutral-400">reporter: {flag.reporter_contact}</Text>
       ) : null}
     </View>
   );
@@ -121,10 +121,10 @@ function PendingRow({ item, onDone }: { item: PendingVerificationItem; onDone: (
   const overrideEntries = Object.entries(item.overrides);
   return (
     <View className="gap-1.5 rounded-xl border border-amber-200 bg-amber-50 p-3">
-      <Text className="text-base font-semibold text-neutral-900" numberOfLines={1}>
+      <Text className="text-base font-semibold text-neutral-900 dark:text-neutral-100" numberOfLines={1}>
         {item.name}
       </Text>
-      <Text className="text-xs text-neutral-600">
+      <Text className="text-xs text-neutral-600 dark:text-neutral-300">
         {item.venue_name}
         {[item.brand, item.package_size].filter(Boolean).length > 0
           ? ` · ${[item.brand, item.package_size].filter(Boolean).join(" · ")}`
@@ -134,8 +134,8 @@ function PendingRow({ item, onDone }: { item: PendingVerificationItem; onDone: (
       {providers.length > 0 ? (
         <View className="flex-row flex-wrap gap-1">
           {providers.map((p) => (
-            <View key={p} className="rounded-full bg-neutral-200 px-2 py-0.5">
-              <Text className="text-xs font-medium text-neutral-700">{p}</Text>
+            <View key={p} className="rounded-full bg-neutral-200 dark:bg-neutral-700 px-2 py-0.5">
+              <Text className="text-xs font-medium text-neutral-700 dark:text-neutral-300">{p}</Text>
             </View>
           ))}
         </View>
@@ -143,7 +143,7 @@ function PendingRow({ item, onDone }: { item: PendingVerificationItem; onDone: (
       {overrideEntries.length > 0 ? (
         <View className="gap-0.5">
           {overrideEntries.map(([field, o]) => (
-            <Text key={field} className="text-xs text-neutral-700">
+            <Text key={field} className="text-xs text-neutral-700 dark:text-neutral-300">
               {field}: {String(o.lookup ?? "—")} →{" "}
               <Text className="font-semibold">{String(o.submitted)}</Text>
             </Text>
@@ -175,12 +175,12 @@ function PendingRow({ item, onDone }: { item: PendingVerificationItem; onDone: (
           >
             <View
               className={`h-4 w-4 items-center justify-center rounded border ${
-                verifyNutrition ? "border-emerald-700 bg-emerald-700" : "border-neutral-400 bg-white"
+                verifyNutrition ? "border-emerald-700 bg-emerald-700" : "border-neutral-400 dark:border-neutral-500 bg-white dark:bg-neutral-800"
               }`}
             >
               {verifyNutrition ? <Text className="text-xs font-bold text-white">✓</Text> : null}
             </View>
-            <Text className="text-xs text-neutral-700">nutrition verified</Text>
+            <Text className="text-xs text-neutral-700 dark:text-neutral-300">nutrition verified</Text>
           </Pressable>
         ) : null}
       </View>
@@ -238,7 +238,7 @@ function Queue() {
   );
 
   return (
-    <View className="flex-1 bg-neutral-50">
+    <View className="flex-1 bg-neutral-50 dark:bg-neutral-900">
       {/* Queue switch: normal submissions vs the trusted-publish double-check. */}
       <View className="flex-row gap-2 px-4 pt-4">
         {(
@@ -251,11 +251,11 @@ function Queue() {
             key={key}
             onPress={() => setTab(key)}
             className={`rounded-full px-3 py-1.5 ${
-              tab === key ? "bg-emerald-700" : "bg-neutral-200 active:bg-neutral-300"
+              tab === key ? "bg-emerald-700" : "bg-neutral-200 dark:bg-neutral-700 active:bg-neutral-300"
             }`}
           >
             <Text
-              className={`text-xs font-semibold ${tab === key ? "text-white" : "text-neutral-700"}`}
+              className={`text-xs font-semibold ${tab === key ? "text-white" : "text-neutral-700 dark:text-neutral-300"}`}
             >
               {label}
             </Text>
@@ -280,7 +280,7 @@ function Queue() {
               {pending === null && !error ? <ActivityIndicator color="#047857" /> : null}
               {error ? <Text className="text-center text-sm text-red-600">{error}</Text> : null}
               {pending !== null && !error ? (
-                <Text className="text-sm text-neutral-500">
+                <Text className="text-sm text-neutral-500 dark:text-neutral-400">
                   Nothing pending verification — every trusted item is checked.
                 </Text>
               ) : null}
@@ -299,7 +299,7 @@ function Queue() {
             <View className="gap-2">
               {flags && flags.length > 0 ? (
                 <View className="gap-2">
-                  <Text className="text-xl font-bold text-neutral-900">
+                  <Text className="text-xl font-bold text-neutral-900 dark:text-neutral-100">
                     Flagged items ({flags.length})
                   </Text>
                   {flags.map((flag) => (
@@ -311,7 +311,7 @@ function Queue() {
                   ))}
                 </View>
               ) : null}
-              <Text className="text-xl font-bold text-neutral-900">Review queue</Text>
+              <Text className="text-xl font-bold text-neutral-900 dark:text-neutral-100">Review queue</Text>
             </View>
           }
           ListEmptyComponent={
@@ -319,7 +319,7 @@ function Queue() {
               {subs === null && !error ? <ActivityIndicator color="#047857" /> : null}
               {error ? <Text className="text-center text-sm text-red-600">{error}</Text> : null}
               {subs !== null && !error ? (
-                <Text className="text-sm text-neutral-500">Queue is empty — nothing to review.</Text>
+                <Text className="text-sm text-neutral-500 dark:text-neutral-400">Queue is empty — nothing to review.</Text>
               ) : null}
             </View>
           }

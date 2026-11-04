@@ -5,6 +5,7 @@ import { getDb } from "../db/client";
 import { AREAS, VENUE_TYPES } from "../db/schema";
 import type { Env } from "../env";
 import { getTopBadges } from "../lib/badges";
+import { preferredHandle } from "../lib/gravatar";
 import { requireAuth, type AuthVariables } from "../middleware/auth";
 
 // Leaderboard knobs are constants in code, per the phase-2 plan.
@@ -17,7 +18,6 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // in src/lib/freshness.ts.
 const PERIOD_MS: Record<Exclude<Period, "all">, number> = { week: 7 * DAY_MS, month: 30 * DAY_MS };
 const BOARD_SIZE = 50;
-const MAX_DISPLAY_NAME = 80;
 // Any signed-in user may edit their own leaderboard prefs — same role set
 // as the other phase-2 write endpoints.
 const ME_ROLES = ["submitter", "reviewer", "admin"];
@@ -68,10 +68,13 @@ function countedSource(kind: Kind): CountedSource {
 // as { rank, name, count } plus `me`, the caller's own { rank, count } —
 // null for anonymous callers and callers with no qualifying rows.
 //
-// Opt-in privacy (Review Focus #5): rows render `display_name` only when the
-// user set show_on_leaderboard; every other row — and opted-in users with an
-// empty name — renders "Anonymous". `user` is the untracked better-auth
-// table, so the join is raw SQL and the row carries no id/email at all.
+// Opt-in privacy (Review Focus #5): rows render a name only when the user
+// set show_on_leaderboard — and that name is their Gravatar-VERIFIED social
+// handle (preferred_social), never freeform text: display_name can't be
+// moderated at scale, so it no longer renders here at all. Every other row
+// — and opted-in users without a verified handle — renders "Anonymous".
+// `user` is the untracked better-auth table, so the join is raw SQL and the
+// row carries no id/email at all.
 //
 // Many small boards by design: when the caller is signed in and doesn't pass
 // `area`, the board defaults to the area they check into most (their home
@@ -122,8 +125,6 @@ leaderboardsApi.get("/leaderboards", async (c) => {
 
   const rows = (await db.all(sql`
     SELECT t.user_id AS user_id, t.n AS n,
-      CASE WHEN u.show_on_leaderboard = 1 AND u.display_name IS NOT NULL AND u.display_name <> ''
-        THEN u.display_name ELSE 'Anonymous' END AS name,
       u.show_on_leaderboard AS show_on_leaderboard
     FROM (
       SELECT c.user_id AS user_id, count(DISTINCT c.id) AS n
@@ -132,25 +133,29 @@ leaderboardsApi.get("/leaderboards", async (c) => {
     LEFT JOIN "user" AS u ON u.id = t.user_id
     ORDER BY t.n DESC, t.user_id ASC
     LIMIT ${BOARD_SIZE}
-  `)) as { user_id: string; n: number; name: string; show_on_leaderboard: number | null }[];
+  `)) as { user_id: string; n: number; show_on_leaderboard: number | null }[];
 
-  // Badge flair (Task 8): each OPTED-IN row carries its user's
-  // highest-tier badge key — badges leak activity patterns, so opted-out
-  // rows always read null, same privacy gate as /api/users/:id/badges.
-  // One batched pass for the whole board, not a lookup per row.
+  // Opted-in rows get their name + badge flair in two batched passes — never
+  // a lookup per row. The name is the verified social handle; the badge is
+  // their highest-tier key — both leak activity patterns, so the same
+  // show_on_leaderboard gate covers both.
   const optedIn = rows.filter((r) => Number(r.show_on_leaderboard) === 1).map((r) => r.user_id);
-  const topBadges = await getTopBadges(db, optedIn);
+  const [topBadges, socialNames] = await Promise.all([
+    getTopBadges(db, optedIn),
+    getSocialNames(db, optedIn),
+  ]);
 
   // Competition ranking (1 + count of strictly-greater entries) so ties
   // share a rank — the same rule `me` is computed with below.
   let rank = 0;
   const board = rows.map((r, i) => {
     if (i === 0 || Number(r.n) !== Number(rows[i - 1]!.n)) rank = i + 1;
+    const opted = Number(r.show_on_leaderboard) === 1;
     return {
       rank,
-      name: String(r.name),
+      name: opted ? (socialNames.get(r.user_id) ?? "Anonymous") : "Anonymous",
       count: Number(r.n),
-      top_badge: Number(r.show_on_leaderboard) === 1 ? (topBadges.get(r.user_id) ?? null) : null,
+      top_badge: opted ? (topBadges.get(r.user_id) ?? null) : null,
     };
   });
 
@@ -175,11 +180,35 @@ leaderboardsApi.get("/leaderboards", async (c) => {
   return c.json({ board, me, area: effectiveArea ?? null });
 });
 
+// The board's public name: the handle of the user's preferred_social, read
+// off their cached Gravatar verified-accounts snapshot. One batched query
+// for the opted-in set (same shape as getTopBadges). A missing preferred
+// pick, an empty/malformed snapshot, or a platform that vanished from the
+// snapshot all yield no name → the row renders "Anonymous".
+async function getSocialNames(db: ReturnType<typeof getDb>, userIds: string[]): Promise<Map<string, string>> {
+  const names = new Map<string, string>();
+  if (userIds.length === 0) return names;
+  const rows = (await db.all(sql`
+    SELECT id, preferred_social, gravatar_accounts FROM "user"
+    WHERE id IN (${sql.join(
+      userIds.map((id) => sql`${id}`),
+      sql`, `,
+    )})
+  `)) as { id: string; preferred_social: string | null; gravatar_accounts: string | null }[];
+  for (const r of rows) {
+    const handle = preferredHandle(r.gravatar_accounts, r.preferred_social);
+    if (handle) names.set(r.id, handle);
+  }
+  return names;
+}
+
 // PATCH /api/me — the opt-in prefs that live on the better-auth `user`
 // table (untracked by drizzle, hence the raw UPDATE). Body fields, all
-// optional: display_name (string|null, ≤80 chars — empty clears it),
-// show_on_leaderboard (bool), show_credit (bool). A patch naming none of
-// them is a 400. Returns the stored values.
+// optional: theme ("light"|"dark"|"system"), preferred_social (platform key
+// from the caller's cached Gravatar-verified accounts, or null to clear),
+// show_on_leaderboard (bool), show_credit (bool). display_name is not
+// accepted — freeform public names can't be moderated at scale. A patch
+// naming none of the accepted fields is a 400. Returns the stored values.
 leaderboardsApi.patch("/me", requireAuth(ME_ROLES), async (c) => {
   let body: Record<string, unknown>;
   try {
@@ -192,15 +221,36 @@ leaderboardsApi.patch("/me", requireAuth(ME_ROLES), async (c) => {
   }
 
   const sets: SQL[] = [];
-  if (body.display_name !== undefined) {
-    if (body.display_name !== null && typeof body.display_name !== "string") {
-      return c.json({ error: "display_name must be a string or null" }, 400);
+  const userId = c.get("user").id;
+  // display_name is deliberately NOT accepted: a freeform public name can't
+  // be moderated at scale. The public name is preferred_social — one of the
+  // user's Gravatar-verified accounts.
+  if (body.theme !== undefined) {
+    if (body.theme !== "light" && body.theme !== "dark" && body.theme !== "system") {
+      return c.json({ error: `theme must be "light", "dark" or "system"` }, 400);
     }
-    const name = typeof body.display_name === "string" ? body.display_name.trim() : null;
-    if (name !== null && name.length > MAX_DISPLAY_NAME) {
-      return c.json({ error: `display_name must be at most ${MAX_DISPLAY_NAME} characters` }, 400);
+    sets.push(sql`"theme" = ${body.theme}`);
+  }
+  if (body.preferred_social !== undefined) {
+    if (body.preferred_social !== null && typeof body.preferred_social !== "string") {
+      return c.json({ error: "preferred_social must be a string or null" }, 400);
     }
-    sets.push(sql`"display_name" = ${name === "" ? null : name}`);
+    if (body.preferred_social !== null) {
+      const [u] = (await getDb(c.env).all(sql`
+        SELECT gravatar_accounts FROM "user" WHERE id = ${userId}
+      `)) as { gravatar_accounts: string | null }[];
+      let accounts: { platform?: string }[] = [];
+      try {
+        const parsed: unknown = JSON.parse(u?.gravatar_accounts ?? "[]");
+        if (Array.isArray(parsed)) accounts = parsed;
+      } catch {
+        accounts = [];
+      }
+      if (!accounts.some((a) => a.platform === body.preferred_social)) {
+        return c.json({ error: "preferred_social is not a verified account" }, 400);
+      }
+    }
+    sets.push(sql`"preferred_social" = ${body.preferred_social}`);
   }
   for (const key of ["show_on_leaderboard", "show_credit"] as const) {
     if (body[key] !== undefined) {
@@ -210,10 +260,12 @@ leaderboardsApi.patch("/me", requireAuth(ME_ROLES), async (c) => {
     }
   }
   if (sets.length === 0) {
-    return c.json({ error: "nothing to update: provide display_name, show_on_leaderboard or show_credit" }, 400);
+    return c.json(
+      { error: "nothing to update: provide theme, preferred_social, show_on_leaderboard or show_credit" },
+      400,
+    );
   }
 
-  const userId = c.get("user").id;
   // "updatedAt" is the better-auth timestamp column (ISO strings via the
   // kysely adapter) — no trigger keeps it fresh, so we bump it.
   sets.push(sql`"updatedAt" = ${new Date().toISOString()}`);
@@ -221,12 +273,21 @@ leaderboardsApi.patch("/me", requireAuth(ME_ROLES), async (c) => {
   await db.run(sql`UPDATE "user" SET ${sql.join(sets, sql`, `)} WHERE id = ${userId}`);
 
   const [row] = (await db.all(sql`
-    SELECT display_name, show_on_leaderboard, show_credit FROM "user" WHERE id = ${userId}
-  `)) as { display_name: string | null; show_on_leaderboard: number; show_credit: number }[];
+    SELECT display_name, show_on_leaderboard, show_credit, theme, preferred_social
+    FROM "user" WHERE id = ${userId}
+  `)) as {
+    display_name: string | null;
+    show_on_leaderboard: number;
+    show_credit: number;
+    theme: string | null;
+    preferred_social: string | null;
+  }[];
   return c.json({
     display_name: row?.display_name ?? null,
     show_on_leaderboard: row?.show_on_leaderboard === 1,
     show_credit: row?.show_credit === 1,
+    theme: row?.theme ?? "system",
+    preferred_social: row?.preferred_social ?? null,
   });
 });
 

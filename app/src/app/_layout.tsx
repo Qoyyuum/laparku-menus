@@ -3,15 +3,20 @@ import "../global.css";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { HeaderTitle } from "../components/HeaderTitle";
+import { navColors, ThemeProvider, useTheme } from "../theme";
 
-export default function RootLayout() {
+// Chrome colors follow the resolved theme; the provider hydrates the pref
+// from cache → server (see ../theme.tsx).
+function ThemedShell() {
+  const { scheme } = useTheme();
+  const colors = navColors(scheme);
   return (
     <>
-      <StatusBar style="auto" />
+      <StatusBar style={colors.statusBar} />
       <Stack
         screenOptions={{
-          headerStyle: { backgroundColor: "#047857" },
-          headerTintColor: "#fff",
+          headerStyle: { backgroundColor: colors.headerBg },
+          headerTintColor: colors.headerText,
           // Tappable wordmark → home (cancels data entry).
           headerTitle: () => <HeaderTitle />,
         }}
@@ -29,5 +34,13 @@ export default function RootLayout() {
         <Stack.Screen name="admin/review/[id]" options={{ title: "Review submission" }} />
       </Stack>
     </>
+  );
+}
+
+export default function RootLayout() {
+  return (
+    <ThemeProvider>
+      <ThemedShell />
+    </ThemeProvider>
   );
 }

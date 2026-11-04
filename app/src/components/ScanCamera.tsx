@@ -55,7 +55,7 @@ export function ScanCamera({ active, onCode }: ScanCameraProps) {
             <Text className="text-sm font-semibold text-white">Allow camera</Text>
           </Pressable>
         ) : (
-          <Text className="text-center text-xs text-neutral-400">
+          <Text className="text-center text-xs text-neutral-400 dark:text-neutral-500 dark:text-neutral-400">
             Enable it in your device settings, or type codes in the field below instead.
           </Text>
         )}
