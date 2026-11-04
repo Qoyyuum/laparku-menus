@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
+import { Platform, Pressable, Text, TextInput, View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { authClient } from "../auth";
 
@@ -47,6 +47,28 @@ export function MagicLinkForm({
         </Text>
       ) : (
         <>
+          {Platform.OS === "web" ? (
+            <Pressable
+              className="items-center rounded-lg border border-emerald-700 px-4 py-2.5 disabled:opacity-50"
+              disabled={busy}
+              onPress={async () => {
+                setBusy(true);
+                setError(null);
+                // Cancellation/failure just returns here — the email form is
+                // already on screen, so nothing to recover.
+                const { error: err } = await authClient.signIn.passkey();
+                setBusy(false);
+                if (err) setError("Passkey didn't work — use the email link instead.");
+              }}
+            >
+              <Text className="text-base font-semibold text-emerald-700 dark:text-emerald-400">
+                {busy ? "…" : "Sign in with a passkey"}
+              </Text>
+            </Pressable>
+          ) : null}
+          {Platform.OS === "web" ? (
+            <Text className="text-center text-xs text-neutral-500 dark:text-neutral-400">or</Text>
+          ) : null}
           <TextInput
             className="rounded-lg border border-neutral-300 dark:border-neutral-600 px-3 py-2 text-base"
             placeholder="you@example.com"
