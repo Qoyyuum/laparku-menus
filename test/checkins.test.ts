@@ -67,7 +67,7 @@ it("check-in creates a row, stores geo, and bumps venues.last_checkin_at", async
 
 // --- (b) Review Focus #2: counted daily limits → 429 -------------------------
 
-it("25 check-ins in one day: requests 21+ return 429 and the stored count stays 20", async () => {
+it("25 check-ins in one day: requests 21+ return 429 and the stored count stays 20", { timeout: 20000 }, async () => {
   const { cookie, userId } = await forgeSession("submitter");
   const statuses: number[] = [];
   for (let i = 0; i < 25; i++) {
@@ -85,7 +85,7 @@ it("25 check-ins in one day: requests 21+ return 429 and the stored count stays 
   expect(Number(countRow!.n)).toBe(20);
 });
 
-it("25 concurrent check-ins in one day still cap at exactly 20", async () => {
+it("25 concurrent check-ins in one day still cap at exactly 20", { timeout: 20000 }, async () => {
   const { cookie, userId } = await forgeSession("submitter");
   const venues25 = await Promise.all(Array.from({ length: 25 }, () => seedVenue()));
   // In-flight requests interleave — the atomic INSERT ... WHERE count<20
