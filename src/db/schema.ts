@@ -60,7 +60,9 @@ const updatedAt = () =>
     .$defaultFn(() => new Date())
     .$onUpdate(() => new Date());
 
-export const venues = sqliteTable("venues", {
+export const venues = sqliteTable(
+  "venues",
+  {
   id: id(),
   name: text("name").notNull(),
   name_ms: text("name_ms"),
@@ -89,11 +91,20 @@ export const venues = sqliteTable("venues", {
   // OpenStreetMap provenance for venues created from a Nominatim pick via
   // POST /api/venues — "<osm_type>/<osm_id>" (e.g. "node/123", "way/456").
   // Doubles as the dedup key: a second create for the same OSM object
-  // returns the existing row instead of inserting a twin.
+  // returns the existing row instead of inserting a twin. The UNIQUE
+  // index (0005) is the atomic race backstop for that check-then-insert
+  // (SQLite counts each NULL as distinct, so non-OSM rows coexist fine).
   osm_ref: text("osm_ref"),
+  // better-auth user id of the trusted-create caller (POST /api/venues) —
+  // drives the per-user daily venue-create cap. Plain text, no drizzle
+  // FK into the untracked "user" table (same convention as
+  // submissions.user_id). NULL on every non-trusted-create row.
+  created_by: text("created_by"),
   created_at: createdAt(),
   updated_at: updatedAt(),
-});
+  },
+  (t) => [uniqueIndex("venues_osm_ref_idx").on(t.osm_ref)],
+);
 
 export const submissions = sqliteTable(
   "submissions",

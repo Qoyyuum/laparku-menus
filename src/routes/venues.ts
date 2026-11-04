@@ -17,6 +17,10 @@ const WRITE_ROLES = ["submitter", "reviewer", "admin"];
 // Soft-dedup radius for POST /api/venues — two same-named points this
 // close are the same shop, not two branches.
 const DEDUP_M = 50;
+// Trusted-create cap (same model as the 20/day check-in and 100/day scan
+// caps): at most this many new venue rows per user per UTC day, enforced
+// atomically inside the insert.
+const MAX_VENUES_PER_USER_PER_DAY = 10;
 const M_PER_DEG_LAT = 111_320;
 const EARTH_R_M = 6_371_000;
 const toRad = (deg: number) => (deg * Math.PI) / 180;
@@ -30,11 +34,22 @@ function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): num
 
 // Loose name match for the proximity dedup: case/whitespace-insensitive
 // equality, or one name containing the other ("Kaizen" vs "Kaizen Sushi").
+// The containment arm only runs when the shorter name is ≥4 chars —
+// otherwise a one-word shared token ("Sushi", "A") would merge every
+// same-street shop into its neighbour.
 function similarName(a: string, b: string): boolean {
   const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
   const na = norm(a);
   const nb = norm(b);
-  return na === nb || na.includes(nb) || nb.includes(na);
+  if (na === nb) return true;
+  const [shorter, longer] = na.length <= nb.length ? [na, nb] : [nb, na];
+  return shorter.length >= 4 && longer.includes(shorter);
+}
+
+// UTC day boundary — the same clock check-ins and verifications use for
+// their per-day caps, so all three agree on what "today" means.
+function utcDayStart(now: Date): Date {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 }
 
 // A coordinate query param: missing/blank → undefined (optional) or the
@@ -103,11 +118,26 @@ venuesApi.post("/venues", rateLimit, requireAuth(WRITE_ROLES), async (c) => {
   const { name, type, area, address, lat, lng, osm_ref } = parsed.data;
   const db = getDb(c.env);
   const months = staleMonths(c.env);
+  const userId = c.get("user").id;
 
-  // Hard dedup: the same OSM object can only ever be one venue.
+  // Hard dedup: the same OSM object can only ever be one venue. A
+  // non-published row carrying the ref is the same real place held in a
+  // dead record — revive it to published (rather than letting the unique
+  // index force a confusing failure or a shadow twin) and treat it as a
+  // dedup hit: revives mint no new row and don't consume the daily cap.
   if (osm_ref) {
     const [existing] = await db.select().from(venues).where(eq(venues.osm_ref, osm_ref)).limit(1);
-    if (existing) return c.json({ venue: withFreshness(existing, months) }, 200);
+    if (existing) {
+      if (existing.status === "published") {
+        return c.json({ venue: withFreshness(existing, months) }, 200);
+      }
+      const [revived] = await db
+        .update(venues)
+        .set({ status: "published", is_stub: false, last_verified_at: new Date() })
+        .where(eq(venues.id, existing.id))
+        .returning();
+      return c.json({ venue: withFreshness(revived!, months) }, 200);
+    }
   }
 
   // Soft dedup: a published venue within ~50 m with a similar name is the
@@ -137,25 +167,45 @@ venuesApi.post("/venues", rateLimit, requireAuth(WRITE_ROLES), async (c) => {
   );
   if (match) return c.json({ venue: withFreshness(match, months) }, 200);
 
-  const [venue] = await db
-    .insert(venues)
-    .values({
-      name,
-      type: type ?? "restaurant",
-      area: area ?? "Brunei-Muara",
-      address: address ?? null,
-      geo: { lat, lng },
-      halal_status: "unknown",
-      verification: "unverified",
-      status: "published",
-      // Trusted-create is itself a verification event — same signal as a
-      // reviewer approve or a positive verify vote, so the freshness
-      // clock starts now rather than reading as never-verified.
-      last_verified_at: new Date(),
-      is_stub: false,
-      osm_ref: osm_ref ?? null,
-    })
-    .returning();
+  // The 10/user/day cap is enforced INSIDE the insert — a plain
+  // count-then-insert lets concurrent requests both pass the check and
+  // both write. `INSERT ... SELECT ... WHERE (count) < cap` evaluates the
+  // cap atomically with the write (same pattern as check-ins); zero
+  // RETURNING rows means the cap was hit. Bound values are raw SQLite
+  // types — epoch-ms ints, JSON text for geo — D1 doesn't accept
+  // Date/boolean bind params.
+  const now = new Date();
+  const dayStart = utcDayStart(now);
+  const id = crypto.randomUUID();
+  let inserted: Record<string, unknown> | undefined;
+  try {
+    inserted = (await db.get(sql`
+      INSERT INTO venues (id, name, type, area, address, geo, halal_status, verification,
+                          status, last_verified_at, is_stub, osm_ref, created_by, created_at, updated_at)
+      SELECT ${id}, ${name}, ${type ?? "restaurant"}, ${area ?? "Brunei-Muara"},
+             ${address ?? null}, ${JSON.stringify({ lat, lng })}, 'unknown', 'unverified',
+             'published', ${now.getTime()}, 0, ${osm_ref ?? null}, ${userId},
+             ${now.getTime()}, ${now.getTime()}
+      WHERE (
+        SELECT count(*) FROM venues
+        WHERE created_by = ${userId} AND created_at >= ${dayStart.getTime()}
+      ) < ${MAX_VENUES_PER_USER_PER_DAY}
+      RETURNING id
+    `)) as Record<string, unknown> | undefined;
+  } catch (e) {
+    // Race loser of a same-osm_ref create: the venues_osm_ref_idx UNIQUE
+    // index fired, so the winner's row is the correct answer — return it
+    // as the dedup hit it effectively is.
+    if (e instanceof Error && /unique/i.test(e.message) && osm_ref) {
+      const [winner] = await db.select().from(venues).where(eq(venues.osm_ref, osm_ref)).limit(1);
+      if (winner) return c.json({ venue: withFreshness(winner, months) }, 200);
+    }
+    throw e;
+  }
+  if (!inserted) {
+    return c.json({ error: "daily venue limit reached" }, 429);
+  }
+  const [venue] = await db.select().from(venues).where(eq(venues.id, id)).limit(1);
   return c.json({ venue: withFreshness(venue!, months) }, 201);
 });
 

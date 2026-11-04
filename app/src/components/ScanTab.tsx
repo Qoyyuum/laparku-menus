@@ -29,6 +29,7 @@ import {
   View,
 } from "react-native";
 import {
+  AREAS,
   apiFetch,
   createVenue,
   lookupProduct,
@@ -682,6 +683,16 @@ function osmVenueType(p: OsmPlace): Venue["type"] {
   return "restaurant";
 }
 
+// Best-effort map from Nominatim address parts (state/county/district) or
+// a display_name onto our district enum — Brunei OSM rows read e.g.
+// "Daerah Brunei-Muara" / "Tutong", so a contains-match suffices. Misses
+// fall back to undefined → the server default (Brunei-Muara).
+function osmArea(...parts: (string | undefined)[]): (typeof AREAS)[number] | undefined {
+  const hay = parts.filter(Boolean).join(" ").toLowerCase();
+  if (!hay) return undefined;
+  return AREAS.find((a) => hay.includes(a.toLowerCase()));
+}
+
 // Venue pick, submit-time edition (spec §3): "Use my location" →
 // /api/venues/nearby → "Near you" top-5 with the closest preselected;
 // on web an OSM map with a draggable pin re-queries the list for wherever
@@ -864,7 +875,15 @@ function VenuePicker({
   // venue, then it becomes the pick like any other row.
   async function createAndPick(
     key: string,
-    body: { name: string; type?: Venue["type"]; address?: string; lat: number; lng: number; osm_ref?: string },
+    body: {
+      name: string;
+      type?: Venue["type"];
+      area?: Venue["area"];
+      address?: string;
+      lat: number;
+      lng: number;
+      osm_ref?: string;
+    },
   ) {
     if (creating) return;
     setCreating(key);
@@ -891,6 +910,7 @@ function VenuePicker({
     void createAndPick(`${p.osm_type}/${p.osm_id}`, {
       name: p.name,
       type: osmVenueType(p),
+      area: osmArea(p.address?.state, p.address?.county, p.address?.district, p.display_name),
       address: p.display_name !== p.name ? p.display_name : undefined,
       lat: p.lat,
       lng: p.lng,
@@ -940,6 +960,7 @@ function VenuePicker({
               onPress={() =>
                 void createAndPick("pin", {
                   name: pinSuggestion.name,
+                  area: osmArea(pinSuggestion.address),
                   address: pinSuggestion.address,
                   lat: pinSuggestion.lat,
                   lng: pinSuggestion.lng,

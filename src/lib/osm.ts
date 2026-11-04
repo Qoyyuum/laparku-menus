@@ -16,8 +16,9 @@ const USER_AGENT = "laparku-menus/1.0";
 const TIMEOUT_MS = 5_000;
 const RESULT_LIMIT = 8;
 // Bounding box half-width applied around the caller's position — a ~0.5°
-// span (~55 km) biases results to the user's area without excluding the
-// far end of a Brunei-sized country.
+// span (~55 km) biases results to the user's area. Deliberately NOT
+// bounded=1: an unbounded viewbox only *ranks* nearby results first, so a
+// valid hit further away (e.g. Temburong from a BSB pin) still returns.
 const VIEWBOX_HALF_DEG = 0.25;
 
 // Normalized search hit — the client's raw material for the OSM candidate
@@ -77,9 +78,10 @@ function normalizePlace(raw: unknown): OsmPlace | null {
   };
 }
 
-// Nominatim /search. When `at` is given, results are bounded to a
-// VIEWBOX_HALF_DEG box around it (viewbox + bounded=1); without coords the
-// query is global and Nominatim ranks it alone.
+// Nominatim /search. When `at` is given, a VIEWBOX_HALF_DEG viewbox
+// biases ranking toward the user's area WITHOUT excluding hits outside
+// it (no bounded=1 — see VIEWBOX_HALF_DEG); without coords the query is
+// global and Nominatim ranks it alone.
 export async function searchNominatim(q: string, at?: { lat: number; lng: number }): Promise<OsmPlace[]> {
   const url = new URL(SEARCH_URL);
   url.searchParams.set("format", "jsonv2");
@@ -93,7 +95,6 @@ export async function searchNominatim(q: string, at?: { lat: number; lng: number
       "viewbox",
       `${at.lng - VIEWBOX_HALF_DEG},${at.lat + VIEWBOX_HALF_DEG},${at.lng + VIEWBOX_HALF_DEG},${at.lat - VIEWBOX_HALF_DEG}`,
     );
-    url.searchParams.set("bounded", "1");
   }
   try {
     const res = await fetch(url, {

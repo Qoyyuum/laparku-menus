@@ -93,12 +93,15 @@ it("osm-search maps q into a Nominatim jsonv2 request and normalizes results", a
   expect(p.address).toEqual(HIT.address);
 });
 
-it("osm-search adds a bounded ~0.5° viewbox when lat/lng are given", async () => {
-  const calls = mockOsm(() => json([]));
+it("osm-search adds an UNBOUNDED ~0.5° viewbox when lat/lng are given", async () => {
+  const calls = mockOsm(() => json([HIT]));
   const res = await osmSearch("?q=kopitiam&lat=4.9&lng=114.9");
   expect(res.status).toBe(200);
   const url = new URL(calls[0]!.url);
-  expect(url.searchParams.get("bounded")).toBe("1");
+  // viewbox biases ranking only — bounded=1 would *exclude* anything
+  // outside the box (e.g. a Temburong hit from a BSB pin), so it must
+  // stay off.
+  expect(url.searchParams.get("bounded")).toBeNull();
   const box = url.searchParams.get("viewbox")!.split(",").map(Number);
   expect(box).toHaveLength(4);
   // viewbox = minLng,maxLat,maxLng,minLat — roughly ±0.25° around the point.
@@ -106,6 +109,10 @@ it("osm-search adds a bounded ~0.5° viewbox when lat/lng are given", async () =
   expect(box[1]).toBeCloseTo(5.15, 1);
   expect(box[2]).toBeCloseTo(115.15, 1);
   expect(box[3]).toBeCloseTo(4.65, 1);
+  // A far-flung hit Nominatim still returns comes through untouched.
+  expect((await res.json()) as { places: unknown[] }).toEqual({
+    places: [expect.objectContaining({ name: "Kaizen Sushi" })],
+  });
 });
 
 it("osm-search fails gracefully: OSM 5xx, network error and garbage all → {places:[]}", async () => {
@@ -234,15 +241,90 @@ it("POST /api/venues dedups on osm_ref — second create returns the same venue 
 
 it("POST /api/venues dedups on same name within ~50m, but not further away or renamed", async () => {
   const { cookie } = await forgeSession("submitter");
+  // Self-seeded: the test owns its fixture rather than depending on rows
+  // earlier tests in this file happened to create.
+  const SEED = { lat: 4.7, lng: 114.7 };
+  await db()
+    .insert(venues)
+    .values({ name: "Dedup Corner", type: "grocer", area: "Tutong", geo: SEED })
+    .returning();
+
   // ~30 m away, same name (case-folded), no osm_ref → same place.
-  const near = await createVenue({ name: "kaizen sushi", lat: 4.90335, lng: 114.9399 }, cookie);
+  const near = await createVenue({ name: "dedup corner", lat: 4.70025, lng: 114.7001 }, cookie);
   expect(near.status).toBe(200);
 
   // ~500 m away, same name → a different branch, new venue.
-  const far = await createVenue({ name: "Kaizen Sushi", lat: 4.9075, lng: 114.94 }, cookie);
+  const far = await createVenue({ name: "Dedup Corner", lat: 4.7045, lng: 114.7 }, cookie);
   expect(far.status).toBe(201);
 
   // Same spot, different name → not the same place.
-  const renamed = await createVenue({ name: "Sushi Tei", lat: 4.90311, lng: 114.93981 }, cookie);
+  const renamed = await createVenue({ name: "Other Grocer", lat: 4.70001, lng: 114.70001 }, cookie);
   expect(renamed.status).toBe(201);
+});
+
+it("proximity dedup: containment needs a ≥4-char shorter name — 'Ah' never swallows a venue", async () => {
+  const { cookie } = await forgeSession("submitter");
+  const SPOT = { lat: 4.6, lng: 114.6 };
+  await db()
+    .insert(venues)
+    .values({ name: "Ah Meng Kopitiam", type: "restaurant", area: "Belait", geo: SPOT })
+    .returning();
+
+  // "ah" ⊂ "ah meng kopitiam" is only 2 chars — the containment arm must
+  // not fire or every same-street shop merges into its neighbour.
+  const short = await createVenue({ name: "Ah", lat: 4.60001, lng: 114.60001 }, cookie);
+  expect(short.status).toBe(201);
+
+  // A real containment still dedups ("Ah Meng" ⊂ "Ah Meng Kopitiam").
+  const contained = await createVenue({ name: "Ah Meng", lat: 4.60001, lng: 114.60002 }, cookie);
+  expect(contained.status).toBe(200);
+  const body = (await contained.json()) as { venue: { name: string } };
+  expect(body.venue.name).toBe("Ah Meng Kopitiam");
+});
+
+it("osm_ref dedup revives a non-published venue instead of twinning it", async () => {
+  const { cookie } = await forgeSession("submitter");
+  const [dead] = await db()
+    .insert(venues)
+    .values({
+      name: "Closed Kopitiam",
+      type: "restaurant",
+      area: "Brunei-Muara",
+      status: "closed",
+      osm_ref: "node/555777",
+    })
+    .returning();
+
+  const res = await createVenue({ name: "Kopitiam", lat: 4.9, lng: 114.9, osm_ref: "node/555777" }, cookie);
+  expect(res.status).toBe(200);
+  const body = (await res.json()) as { venue: { id: string } };
+  expect(body.venue.id).toBe(dead!.id);
+  const [row] = await db().select().from(venues).where(eq(venues.id, dead!.id));
+  // Revived, not shadowed — scans can attach to it again.
+  expect(row!.status).toBe("published");
+  const rows = await db().select().from(venues).where(eq(venues.osm_ref, "node/555777"));
+  expect(rows).toHaveLength(1);
+});
+
+it("caps trusted venue creation at 10/user/day; dedup hits don't consume it", async () => {
+  const { cookie } = await forgeSession("submitter");
+  const base = { lat: 4.2, lng: 114.2 };
+  // Unique uuid names keep the soft dedup out of the count.
+  const firstName = `cap-${crypto.randomUUID()}`;
+  expect((await createVenue({ ...base, name: firstName, osm_ref: "way/42" }, cookie)).status).toBe(201);
+  for (let i = 1; i < 10; i++) {
+    expect((await createVenue({ ...base, name: `cap-${crypto.randomUUID()}` }, cookie)).status).toBe(201);
+  }
+
+  // The 11th fresh create is refused.
+  const over = await createVenue({ ...base, name: `cap-${crypto.randomUUID()}` }, cookie);
+  expect(over.status).toBe(429);
+  expect(((await over.json()) as { error: string }).error).toContain("daily venue limit");
+
+  // Dedup hits return the existing row — they mint nothing, so they still
+  // answer 200 at cap (osm_ref hit and name+proximity hit alike).
+  expect(
+    (await createVenue({ ...base, name: `cap-${crypto.randomUUID()}`, osm_ref: "way/42" }, cookie)).status,
+  ).toBe(200);
+  expect((await createVenue({ ...base, name: firstName }, cookie)).status).toBe(200);
 });
