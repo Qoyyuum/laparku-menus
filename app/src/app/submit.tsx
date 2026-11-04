@@ -1,7 +1,7 @@
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import { useEffect, useState } from "react";
-import { Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Image, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { API_BASE, SOURCE_TYPES } from "../api";
 import { getAuthCookie } from "../auth";
 import { SignInGate } from "../components/SignInGate";
@@ -28,6 +28,27 @@ interface PickedFile {
   name: string;
   mimeType?: string;
   file?: File; // web only — avoids a second fetch of the blob
+}
+
+// Web-side downscale: phone/desktop screenshots easily exceed the server's
+// per-file cap, so large images are recompressed to JPEG before upload.
+const MAX_DIM = 1600;
+async function compressImage(file: File): Promise<File> {
+  if (!file.type.startsWith("image/") || file.type === "image/gif") return file;
+  try {
+    const bmp = await createImageBitmap(file);
+    const scale = Math.min(1, MAX_DIM / Math.max(bmp.width, bmp.height));
+    if (scale === 1 && file.size < 800_000) return file;
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bmp.width * scale);
+    canvas.height = Math.round(bmp.height * scale);
+    canvas.getContext("2d")!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/jpeg", 0.82));
+    if (!blob || blob.size >= file.size) return file;
+    return new File([blob], file.name.replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" });
+  } catch {
+    return file;
+  }
 }
 
 // Phase 2: submissions require an account — the form only renders inside a
@@ -61,7 +82,7 @@ function SubmitForm() {
   // fields is never intercepted.
   useEffect(() => {
     if (Platform.OS !== "web") return;
-    const onPaste = (e: ClipboardEvent) => {
+    const onPaste = async (e: ClipboardEvent) => {
       const pasted: PickedFile[] = [];
       for (const item of e.clipboardData?.items ?? []) {
         if (item.kind !== "file") continue;
@@ -70,14 +91,15 @@ function SubmitForm() {
         const isPdf = f.type === "application/pdf";
         const isImage = f.type.startsWith("image/");
         if (!isImage && !(isPdf && sourceType === "menu_pdf")) continue;
+        const file = await compressImage(f);
         pasted.push({
-          uri: URL.createObjectURL(f),
+          uri: URL.createObjectURL(file),
           name:
-            f.name && f.name !== "image.png"
-              ? f.name
-              : `pasted-${Date.now()}.${isPdf ? "pdf" : (f.type.split("/")[1] ?? "png")}`,
-          mimeType: f.type,
-          file: f,
+            file.name && file.name !== "image.png"
+              ? file.name
+              : `pasted-${Date.now()}.${isPdf ? "pdf" : (file.type.split("/")[1] ?? "png")}`,
+          mimeType: file.type,
+          file,
         });
       }
       if (pasted.length) {
@@ -130,17 +152,18 @@ function SubmitForm() {
       ? await ImagePicker.launchCameraAsync(opts)
       : await ImagePicker.launchImageLibraryAsync(opts);
     if (!res.canceled) {
-      setFiles((prev) =>
-        [
-          ...prev,
-          ...res.assets.map((a, i) => ({
-            uri: a.uri,
-            name: a.fileName ?? `photo-${i}.jpg`,
-            mimeType: a.mimeType,
-            file: a.file,
-          })),
-        ].slice(0, MAX_FILES),
+      const picked = await Promise.all(
+        res.assets.map(async (a, i) => {
+          const file = a.file ? await compressImage(a.file) : undefined;
+          return {
+            uri: file ? URL.createObjectURL(file) : a.uri,
+            name: file?.name ?? a.fileName ?? `photo-${i}.jpg`,
+            mimeType: file?.type ?? a.mimeType,
+            file,
+          };
+        }),
       );
+      setFiles((prev) => [...prev, ...picked].slice(0, MAX_FILES));
     }
   }
 
@@ -266,9 +289,36 @@ function SubmitForm() {
           </Text>
         ) : null}
         {files.length > 0 ? (
-          <Text className="text-sm text-neutral-600">
-            {files.length} file{files.length === 1 ? "" : "s"} selected
-          </Text>
+          <>
+            <ScrollView horizontal className="flex-row" showsHorizontalScrollIndicator={false}>
+              {files.map((f, i) => (
+                <View key={`${f.uri}-${i}`} className="relative mr-2">
+                  {f.mimeType?.startsWith("image/") || !f.mimeType ? (
+                    <Image
+                      source={{ uri: f.uri }}
+                      className="h-20 w-20 rounded-lg border border-neutral-200"
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View className="h-20 w-20 items-center justify-center rounded-lg border border-neutral-200 bg-neutral-100">
+                      <Text className="text-xs font-semibold text-neutral-600">PDF</Text>
+                    </View>
+                  )}
+                  <Pressable
+                    className="absolute -right-1.5 -top-1.5 h-5 w-5 items-center justify-center rounded-full bg-neutral-800"
+                    accessibilityLabel={`Remove ${f.name}`}
+                    onPress={() => setFiles((prev) => prev.filter((_, j) => j !== i))}
+                  >
+                    <Text className="text-xs font-bold text-white">×</Text>
+                  </Pressable>
+                </View>
+              ))}
+            </ScrollView>
+            <Text className="text-sm text-neutral-600">
+              {files.length} file{files.length === 1 ? "" : "s"} selected — check the previews, remove
+              any that are wrong, then submit.
+            </Text>
+          </>
         ) : null}
       </View>
 
