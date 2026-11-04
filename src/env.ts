@@ -34,4 +34,8 @@ export interface Env {
   EAN_SEARCH_TOKEN?: string;
   UPCITEMDB_KEY?: string;
   BARCODELookup_KEY?: string;
+  // Gravatar v3 API Bearer key (`wrangler secret put`). Optional upstream,
+  // but raises the verified_accounts cap past 4; absent → socials refresh
+  // skipped (see src/lib/gravatar.ts, src/routes/me.ts).
+  GRAVATAR_API_KEY?: string;
 }
