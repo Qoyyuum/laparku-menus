@@ -14,6 +14,7 @@ import { recordVerification } from "./freshness";
 import { notifyTrustedPublish } from "./notify";
 import { PublishError } from "./publish";
 import { recordRevision } from "./revisions";
+import { indexItems } from "./search-index";
 import type { GmapsMenuSection } from "./gmaps-provider";
 
 // Blast-radius cap — items per user per UTC day going live without review.
@@ -127,6 +128,7 @@ export async function trustedPublishGmaps(
 
   const overflow: typeof items = [];
   let published = 0;
+  const publishedIds: string[] = [];
   for (const [i, item] of candidates.entries()) {
     const id = crypto.randomUUID();
     // Atomic per-item cap — INSERT ... SELECT ... WHERE (count) < cap,
@@ -156,6 +158,7 @@ export async function trustedPublishGmaps(
       break;
     }
     published += 1;
+    publishedIds.push(id);
   }
 
   let reviewSubmissionId: string | null = null;
@@ -246,6 +249,12 @@ export async function trustedPublishGmaps(
       .where(eq(venues.id, venueId))
       .limit(1);
     await notifyTrustedPublish(env, venue?.name ?? venueId, published);
+    // Search index — best-effort like the notify; reindex repairs misses.
+    try {
+      await indexItems(env, db, publishedIds);
+    } catch (e) {
+      console.error("search index hook failed", e);
+    }
   }
 
   return { published, matched, review_submission_id: reviewSubmissionId };

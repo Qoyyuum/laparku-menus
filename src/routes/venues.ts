@@ -6,6 +6,7 @@ import { AREAS, venues, VENUE_TYPES } from "../db/schema";
 import type { Env } from "../env";
 import { staleMonths, withFreshness } from "../lib/freshness";
 import { reverseNominatim, searchNominatim } from "../lib/osm";
+import { indexVenues } from "../lib/search-index";
 import { similarName, venuesNear } from "../lib/venue-match";
 import { requireAuth, type AuthVariables } from "../middleware/auth";
 import { rateLimit } from "../middleware/rate-limit";
@@ -113,6 +114,12 @@ venuesApi.post("/venues", rateLimit, requireAuth(WRITE_ROLES), async (c) => {
         .set({ status: "published", is_stub: false, last_verified_at: new Date() })
         .where(eq(venues.id, existing.id))
         .returning();
+      // A revived row may have been dead while the index was built — upsert it.
+      try {
+        await indexVenues(c.env, db, [revived!.id]);
+      } catch (e) {
+        console.error("search index hook failed", e);
+      }
       return c.json({ venue: withFreshness(revived!, months) }, 200);
     }
   }
@@ -162,6 +169,12 @@ venuesApi.post("/venues", rateLimit, requireAuth(WRITE_ROLES), async (c) => {
     return c.json({ error: "daily venue limit reached" }, 429);
   }
   const [venue] = await db.select().from(venues).where(eq(venues.id, id)).limit(1);
+  // Search index — best-effort; the admin reindex endpoint repairs misses.
+  try {
+    await indexVenues(c.env, db, [id]);
+  } catch (e) {
+    console.error("search index hook failed", e);
+  }
   return c.json({ venue: withFreshness(venue!, months) }, 201);
 });
 

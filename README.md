@@ -112,5 +112,8 @@ bindings or routes.
 - Write endpoints (`POST /api/submissions*`, `POST /api/items/:id/flag`) are
   rate-limited via the `[[ratelimits]]` binding (10 req/min per client IP) —
   see `src/middleware/rate-limit.ts`.
+- `/api/search` is semantic (Vectorize + bge-m3 embeddings, `src/lib/search-index.ts`)
+  when `SEARCH_PROVIDER=vectorize`; `like` falls back to substring matching —
+  e.g. in `.dev.vars` for offline dev, or as a prod kill switch.
 - Native store distribution via EAS Build is deferred; the app runs via Expo Go
   and the exported web bundle on the Worker.

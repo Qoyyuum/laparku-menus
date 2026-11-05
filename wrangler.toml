@@ -37,6 +37,12 @@ GMAPS_PROVIDER = "browser,serpfast"
 GMAPS_DAILY_BROWSER_SECONDS = "1200"
 SERPFAST_DAILY_CALL_CAP = "60"
 GMAPS_DAILY_ITEM_CAP = "100"
+# Semantic search (src/lib/search-index.ts): embedding model + provider
+# selector. "vectorize" runs bge-m3 recall through SEARCH_INDEX; "like"
+# keeps the substring path (tests, offline dev, prod kill switch).
+EMBEDDING_MODEL = "@cf/baai/bge-m3"
+SEARCH_PROVIDER = "vectorize"
+SEARCH_MIN_SCORE = "0.5"
 
 [[d1_databases]]
 binding = "DB"
@@ -73,6 +79,14 @@ run_worker_first = ["/api/*", "/mcp"]
 
 [ai]
 binding = "AI"
+
+# Semantic search index (src/lib/search-index.ts). Create once per env:
+#   npx wrangler vectorize create laparku-search --dimensions=1024 --metric=cosine
+#   npx wrangler vectorize create-metadata-index laparku-search --property-name=kind --type=string
+#   (repeat for venue_id, venue_type, item_type, area, halal — string — and price_bnd — number)
+[[vectorize]]
+binding = "SEARCH_INDEX"
+index_name = "laparku-search"
 
 # Cloudflare Browser Run — headless Chrome for the gmaps_link import
 # provider (src/lib/gmaps-provider.ts). Workers Paid includes 10

@@ -33,6 +33,11 @@ export default defineConfig({
           // better-auth to __Secure- cookie names and every forged session
           // 401s. Keep the test env on http — production config unaffected.
           PUBLIC_BASE_URL: "http://localhost:8787",
+          // Search tests stay deterministic: the semantic branch needs a
+          // real Vectorize index + Workers AI, so the suite runs the LIKE
+          // path; search-index.test.ts exercises the vectorize branch via
+          // wrapped envs + fakes.
+          SEARCH_PROVIDER: "like",
         },
       },
     }),

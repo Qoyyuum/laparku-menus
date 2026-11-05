@@ -17,6 +17,7 @@ import { listStaleVenues } from "../lib/freshness";
 import { notifyUnpublished } from "../lib/notify";
 import { normalizeBarcode } from "../lib/product-lookup";
 import { PublishError, publishSubmission, rejectSubmission, type PublishEdits } from "../lib/publish";
+import { reindexAll, unindex } from "../lib/search-index";
 import { requireAuth, type AuthVariables } from "../middleware/auth";
 
 const REVIEW_ROLES = ["reviewer", "admin"];
@@ -310,6 +311,12 @@ adminApi.post("/items/:id/unpublish", async (c) => {
       await notifyUnpublished(c.env, sub, item.name, venue?.name ?? null);
     }
   }
+  // Hidden items leave the search index — best-effort; reindex repairs.
+  try {
+    await unindex(c.env, [id]);
+  } catch (e) {
+    console.error("search index hook failed", e);
+  }
   return c.json({ ok: true });
 });
 
@@ -347,6 +354,15 @@ adminApi.get("/images/*", async (c) => {
       "x-content-type-options": "nosniff",
     },
   });
+});
+
+// POST /api/admin/search/reindex — rebuild the semantic-search index from
+// D1 (src/lib/search-index.ts): the one-time backfill after the Vectorize
+// index is created and the repair path when vectors stale-date. No-ops to
+// {items:0, venues:0} when the provider isn't vectorize.
+adminApi.post("/search/reindex", async (c) => {
+  const counts = await reindexAll(c.env, getDb(c.env));
+  return c.json({ ok: true, ...counts });
 });
 
 // GET /api/admin/stale — venues whose freshness needs a reviewer's eye:
