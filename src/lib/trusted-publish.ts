@@ -15,6 +15,7 @@ import { notifyTrustedPublish } from "./notify";
 import { normalizeBarcode } from "./product-lookup";
 import { PublishError } from "./publish";
 import { recordRevision } from "./revisions";
+import { indexItems } from "./search-index";
 
 // Blast-radius cap for the trusted path (spec §5, plan Global Constraints):
 // at most this many items per user per UTC day may go live without review.
@@ -186,6 +187,7 @@ export async function trustedPublishScan(
 
   let trustedId: string | null = null;
   let published = 0;
+  const publishedIds: string[] = [];
   if (publishable.length > 0) {
     trustedId = crypto.randomUUID();
     // Created up-front so items can reference it; removed below if the
@@ -241,6 +243,7 @@ export async function trustedPublishScan(
         break;
       }
       published += 1;
+      publishedIds.push(id);
     }
   }
 
@@ -329,6 +332,12 @@ export async function trustedPublishScan(
       .where(eq(venues.id, venueId))
       .limit(1);
     await notifyTrustedPublish(env, venue?.name ?? "a venue", published);
+    // Search index — best-effort like the notify; reindex repairs misses.
+    try {
+      await indexItems(env, db, publishedIds);
+    } catch (e) {
+      console.error("search index hook failed", e);
+    }
   }
 
   return {

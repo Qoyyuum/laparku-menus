@@ -17,7 +17,7 @@ import { listStaleVenues } from "../lib/freshness";
 import { notifyUnpublished } from "../lib/notify";
 import { normalizeBarcode } from "../lib/product-lookup";
 import { PublishError, publishSubmission, rejectSubmission, type PublishEdits } from "../lib/publish";
-import { reindexAll } from "../lib/search-index";
+import { reindexAll, unindex } from "../lib/search-index";
 import { requireAuth, type AuthVariables } from "../middleware/auth";
 
 const REVIEW_ROLES = ["reviewer", "admin"];
@@ -310,6 +310,12 @@ adminApi.post("/items/:id/unpublish", async (c) => {
       // Awaited like the publish email — never races a post-response freeze.
       await notifyUnpublished(c.env, sub, item.name, venue?.name ?? null);
     }
+  }
+  // Hidden items leave the search index — best-effort; reindex repairs.
+  try {
+    await unindex(c.env, [id]);
+  } catch (e) {
+    console.error("search index hook failed", e);
   }
   return c.json({ ok: true });
 });

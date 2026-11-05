@@ -2,8 +2,12 @@ import { env, SELF } from "cloudflare:test";
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { getDb } from "../src/db/client";
-import { food_items, type FoodItem, type Venue } from "../src/db/schema";
+import { food_items, product_lookup_cache, submissions, venues, type FoodItem, type Venue } from "../src/db/schema";
 import type { Env } from "../src/env";
+import { trustedPublishGmaps } from "../src/lib/gmaps-publish";
+import { normalizeBarcode } from "../src/lib/product-lookup";
+import { publishSubmission } from "../src/lib/publish";
+import { trustedPublishScan } from "../src/lib/trusted-publish";
 import {
   embedTexts,
   indexItems,
@@ -18,6 +22,7 @@ import {
 } from "../src/lib/search-index";
 import adminApi from "../src/routes/admin";
 import { searchPublic } from "../src/routes/public";
+import venuesApi from "../src/routes/venues";
 import { forgeSession } from "./helpers/auth";
 import { seed } from "./helpers/seed";
 
@@ -358,5 +363,123 @@ describe("semantic searchPublic", () => {
     } as Env;
     const r = await searchPublic(w, { q: "katok" });
     expect(r.items.map((i) => i.name)).toContain("Nasi Katok"); // LIKE path still found it
+  });
+});
+
+describe("publish-path indexing hooks", () => {
+  it("trustedPublishScan indexes published items", async () => {
+    const { venue } = await seed(env);
+    const db = getDb(env);
+    const { userId } = await forgeSession("submitter");
+    const barcode = "9550000000001";
+    await db.insert(product_lookup_cache).values({
+      code: normalizeBarcode(barcode)?.code ?? barcode,
+      merged_payload: { name: "Kangkong Chips" },
+      sources: [{ provider: "openfoodfacts" }],
+      found: true,
+      fetched_at: new Date(),
+    });
+    const fi = fakeIndex();
+    await trustedPublishScan(
+      db,
+      {
+        userId,
+        venueId: venue.id,
+        provenance: "test",
+        items: [{ barcode, name: "Kangkong Chips", source_tags: ["openfoodfacts"] }],
+      },
+      semanticEnv(fi),
+    );
+    const upserted = fi.calls.upsert.flat();
+    expect(upserted.map((v) => v.metadata?.kind)).toContain("item");
+  });
+
+  it("trustedPublishGmaps indexes published items", async () => {
+    const { venue } = await seed(env);
+    const db = getDb(env);
+    const { userId } = await forgeSession("submitter");
+    const [sub] = await db
+      .insert(submissions)
+      .values({ source_type: "gmaps_link", user_id: userId, provenance: "test import", status: "pending" })
+      .returning();
+    const fi = fakeIndex();
+    await trustedPublishGmaps(
+      db,
+      {
+        userId,
+        venueId: venue.id,
+        submissionId: sub!.id,
+        sections: [{ name: "Mains", items: [{ name: "Ambuyat Set", price: 8 }] }],
+      },
+      semanticEnv(fi),
+    );
+    const upserted = fi.calls.upsert.flat();
+    expect(upserted.map((v) => v.metadata?.kind)).toContain("item");
+    expect(upserted[0]!.values).toHaveLength(3);
+  });
+
+  it("publishSubmission indexes new items + venue and unindexes superseded", async () => {
+    const { venue, items } = await seed(env);
+    const db = getDb(env);
+    const { userId } = await forgeSession("reviewer");
+    const [sub] = await db
+      .insert(submissions)
+      .values({ source_type: "menu_photo", provenance: "test photo", status: "pending_review" })
+      .returning();
+    const fi = fakeIndex();
+    const result = await publishSubmission(
+      db,
+      sub!.id,
+      userId,
+      { venue_id: venue.id, items: [{ name: "New Dish", item_type: "dish", price_bnd: 4 }] },
+      semanticEnv(fi),
+    );
+    const upserted = fi.calls.upsert.flat();
+    const kinds = upserted.map((v) => v.metadata?.kind);
+    expect(kinds).toContain("venue");
+    expect(kinds).toContain("item");
+    expect(upserted.map((v) => v.id)).toEqual(
+      expect.arrayContaining([venue.id, ...result.inserted_ids]),
+    );
+    // the venue's previously-live item left the index
+    expect(fi.calls.deleted.flat()).toEqual(
+      expect.arrayContaining([items[0]!.id]),
+    );
+  });
+
+  it("POST /api/venues indexes a created venue", async () => {
+    const { cookie } = await forgeSession("submitter");
+    const fi = fakeIndex();
+    const res = await venuesApi.request(
+      "/venues",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie },
+        body: JSON.stringify({ name: "Vector Kedai", lat: 4.9, lng: 114.9 }),
+      },
+      semanticEnv(fi),
+    );
+    expect(res.status).toBe(201);
+    const upserted = fi.calls.upsert.flat();
+    expect(upserted.map((v) => v.metadata?.kind)).toEqual(["venue"]);
+  });
+
+  it("admin unpublish unindexes the item", async () => {
+    await seed(env);
+    const db = getDb(env);
+    const { cookie } = await forgeSession("reviewer");
+    const [item] = await db
+      .select()
+      .from(food_items)
+      .where(eq(food_items.is_current, true))
+      .limit(1);
+    const fi = fakeIndex();
+    const res = await adminApi.request(
+      `/items/${item!.id}/unpublish`,
+      { method: "POST", headers: { cookie } },
+      semanticEnv(fi),
+    );
+    expect(res.status).toBe(200);
+    expect(fi.calls.deleted.flat()).toContain(item!.id);
   });
 });

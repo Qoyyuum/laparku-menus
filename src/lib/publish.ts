@@ -19,6 +19,7 @@ import type { Env } from "../env";
 import type { DraftItem } from "./extractor";
 import { notifyPublished } from "./notify";
 import { clearRevisionsForSubmission, recordRevision } from "./revisions";
+import { indexItems, indexVenues, unindex } from "./search-index";
 
 // Thrown for caller-facing failures; `status` maps straight onto the HTTP
 // response so routes don't re-derive it.
@@ -87,6 +88,10 @@ export interface PublishResult {
   // Existing items kept current through a merge.
   items_kept: number;
   items_superseded: number;
+  // Row ids of the inserts/supersedes — the search-index hook diffs the
+  // index by these (src/lib/search-index.ts).
+  inserted_ids: string[];
+  superseded_ids: string[];
 }
 
 function str(v: unknown): string | undefined {
@@ -363,6 +368,7 @@ export async function publishSubmission(
     // chunked for the same reason (a replace on a large venue drops all).
     const dropIds = current.map((i) => i.id).filter((id) => !keepIds.has(id));
     let supersededCount = 0;
+    const supersededIds: string[] = [];
     const DROP_CHUNK = 90; // + venue_id param stays under the 100-param cap
     for (let off = 0; off < dropIds.length; off += DROP_CHUNK) {
       const updated = await db
@@ -378,6 +384,7 @@ export async function publishSubmission(
         )
         .returning({ id: food_items.id });
       supersededCount += updated.length;
+      supersededIds.push(...updated.map((r) => r.id));
     }
 
     const rows: NewFoodItem[] = selection.drafts.map((item) => ({
@@ -398,9 +405,14 @@ export async function publishSubmission(
     // Batched like the supersede above: each row binds 17 params, so ≥6
     // rows in one VALUES clause would overflow D1's ~100 bound-param cap —
     // and a real menu extraction routinely exceeds 6 draft items.
+    const insertedIds: string[] = [];
     const INSERT_CHUNK = 5; // 5×17 = 85 bound params
     for (let off = 0; off < rows.length; off += INSERT_CHUNK) {
-      await db.insert(food_items).values(rows.slice(off, off + INSERT_CHUNK));
+      const ins = await db
+        .insert(food_items)
+        .values(rows.slice(off, off + INSERT_CHUNK))
+        .returning({ id: food_items.id });
+      insertedIds.push(...ins.map((r) => r.id));
     }
 
     const revisionId = await recordRevision(db, {
@@ -424,6 +436,8 @@ export async function publishSubmission(
       items_published: rows.length,
       items_kept: selection.existingIds.length,
       items_superseded: supersededCount,
+      inserted_ids: insertedIds,
+      superseded_ids: supersededIds,
     };
   } catch (e) {
     // Undo everything this call did, newest first — otherwise a retry would
@@ -469,6 +483,16 @@ export async function publishSubmission(
   // Best-effort (notifyPublished swallows its own failures), awaited so the
   // send isn't racing the response in a worker that may freeze after it.
   await notifyPublished(env, sub);
+  // Search index: the new rows become recallable, superseded ones leave.
+  // Best-effort like the email — a search-infra failure must never fail a
+  // publish; the admin reindex endpoint is the repair path.
+  try {
+    await indexVenues(env, db, [result.venue_id]);
+    await indexItems(env, db, result.inserted_ids);
+    await unindex(env, result.superseded_ids);
+  } catch (e) {
+    console.error("search index hook failed", e);
+  }
   return result;
 }
 
