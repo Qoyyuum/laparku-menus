@@ -42,6 +42,11 @@ export interface VenueDraft {
   instagram?: string;
   website?: string;
   halal_status?: string;
+  // Optional location/provenance — pre-filled from a gmaps_link import so
+  // reviewer-created venues land on the map and carry the dedup key.
+  lat?: number;
+  lng?: number;
+  google_place_id?: string;
 }
 
 // A draft row the reviewer chose to add — the edited fields ride along (the
@@ -190,6 +195,11 @@ async function resolveVenue(db: Db, edits: PublishEdits): Promise<{ id: string; 
   if (draft.halal_status !== undefined && draft.halal_status !== null && !halal) {
     throw new PublishError(400, `venue.halal_status must be one of ${HALAL_STATUSES.join(", ")}`);
   }
+  // Coordinates only land when both parse in range — a half-formed pair
+  // is worse than none.
+  const lat = typeof draft.lat === "number" && draft.lat >= -90 && draft.lat <= 90 ? draft.lat : null;
+  const lng = typeof draft.lng === "number" && draft.lng >= -180 && draft.lng <= 180 ? draft.lng : null;
+  const placeId = str(draft.google_place_id);
   const [venue] = await db
     .insert(venues)
     .values({
@@ -198,11 +208,13 @@ async function resolveVenue(db: Db, edits: PublishEdits): Promise<{ id: string; 
       type: type ?? "restaurant",
       area: area ?? "Brunei-Muara",
       address: str(draft.address) ?? null,
+      geo: lat !== null && lng !== null ? { lat, lng } : null,
       instagram: str(draft.instagram) ?? null,
       website: str(draft.website) ?? null,
       halal_status: halal ?? "unknown",
       verification: "unverified",
       status: "published",
+      google_place_id: placeId ?? null,
     })
     .returning({ id: venues.id });
   return { id: venue!.id, created: true };

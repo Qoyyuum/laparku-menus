@@ -1,13 +1,13 @@
-import { and, eq, lt, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { getDb, type Db } from "../db/client";
 import {
   product_lookup_cache,
-  provider_budget,
   type LookupProduct,
   type LookupSource,
   type NutritionEstimate,
 } from "../db/schema";
 import type { Env } from "../env";
+import { spendBudget } from "./budget";
 
 // Task 1 — multi-source barcode lookup (spec §2, plan Task 1).
 //
@@ -248,33 +248,9 @@ function cacheTtlMs(found: boolean, sources: LookupSource[]): number {
   return sources.every((s) => OFF_FAMILY.has(s.provider)) ? OFF_TTL_MS : COMMERCIAL_TTL_MS;
 }
 
-// Hard-stops a provider once `limit` calls went out today (UTC). The spend
-// is recorded before the request — a timeout still consumed the attempt.
-// The increment is a single conditional UPDATE (… WHERE calls < limit), so
-// concurrent lookups can't overshoot the cap; a missing row falls back to
-// INSERT … ON CONFLICT DO NOTHING, with one retry to absorb insert races.
-async function spendBudget(db: Db, provider: string, limit: number, day: string): Promise<boolean> {
-  const inc = () =>
-    db
-      .update(provider_budget)
-      .set({ calls: sql`${provider_budget.calls} + 1` })
-      .where(
-        and(
-          eq(provider_budget.provider, provider),
-          eq(provider_budget.day, day),
-          lt(provider_budget.calls, limit),
-        ),
-      )
-      .returning({ calls: provider_budget.calls });
-  if ((await inc()).length > 0) return true;
-  const inserted = await db
-    .insert(provider_budget)
-    .values({ provider, day, calls: 1 })
-    .onConflictDoNothing()
-    .returning({ calls: provider_budget.calls });
-  if (inserted.length > 0) return true;
-  return (await inc()).length > 0;
-}
+// Provider budgets counted via the shared helper in src/lib/budget.ts
+// (spend is recorded before the request — a timeout still consumed the
+// attempt).
 
 /**
  * Resolves a barcode to a merged product. Returns null for invalid input

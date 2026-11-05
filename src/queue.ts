@@ -7,6 +7,7 @@ import {
   type ExtractionImage,
 } from "./lib/extractor";
 import { inspectImageMetadata } from "./lib/forensics";
+import { processGmapsImport } from "./lib/gmaps-import";
 import { computePHash, hammingDistance, PHASH_DUP_THRESHOLD } from "./lib/phash";
 
 const { submissions, venues } = schema;
@@ -35,13 +36,30 @@ const QUEUE_MAX_RETRIES = 3;
 // `low_confidence` auto-reject; every other flag only affects queue rank.
 export async function processSubmission(env: Env, id: string): Promise<void> {
   const db = getDb(env);
-  const [sub] = await db.select().from(submissions).where(eq(submissions.id, id)).limit(1);
+  let [sub] = await db.select().from(submissions).where(eq(submissions.id, id)).limit(1);
 
   // Queue delivery is at-least-once — a retried or duplicated message must
   // not re-run extraction on an already-processed row.
   if (!sub || sub.status !== "pending") return;
 
   const flags = new Set(sub.auto_flags ?? []);
+
+  // gmaps_link intake: the row was filed with only the link — the provider
+  // chain resolves it here. "settled" means the import reached a terminal
+  // or review state on its own; "photos" means downloaded images now wait
+  // in R2 and the normal pipeline below reads them.
+  if (sub.source_type === "gmaps_link" && (sub.image_keys ?? []).length === 0) {
+    const outcome = await processGmapsImport(env, db, sub, flags);
+    if (outcome === "settled") return;
+    // The import may have rewritten the row (image_keys + the cached
+    // provider payload the venue-hint fallback reads) — reload both.
+    const [fresh] = await db
+      .select({ image_keys: submissions.image_keys, raw_extraction: submissions.raw_extraction })
+      .from(submissions)
+      .where(eq(submissions.id, id))
+      .limit(1);
+    sub = { ...sub, image_keys: fresh?.image_keys ?? [], raw_extraction: fresh?.raw_extraction ?? null };
+  }
 
   const images: ExtractionImage[] = [];
   for (const key of sub.image_keys ?? []) {
@@ -122,7 +140,7 @@ export async function processSubmission(env: Env, id: string): Promise<void> {
       .set({
         status: "auto_rejected",
         rejection_reason: "no_food_content",
-        raw_extraction: { ...draft },
+        raw_extraction: { ...(sub.raw_extraction?.gmaps ? { gmaps: sub.raw_extraction.gmaps } : {}), ...draft },
         confidence,
         phash,
         auto_flags: [...flags],
@@ -137,13 +155,20 @@ export async function processSubmission(env: Env, id: string): Promise<void> {
       .set({
         status: "auto_rejected",
         rejection_reason: "low_confidence",
-        raw_extraction: { ...draft },
+        raw_extraction: { ...(sub.raw_extraction?.gmaps ? { gmaps: sub.raw_extraction.gmaps } : {}), ...draft },
         confidence,
         phash,
         auto_flags: [...flags],
       })
       .where(eq(submissions.id, id));
     return;
+  }
+
+  // Venue hint fallback for imported photos: when the vision model can't
+  // guess the venue, the resolved Google place name is usually right.
+  if (!draft.venue_guess && sub.source_type === "gmaps_link") {
+    const gmapsName = sub.raw_extraction?.gmaps?.place?.name;
+    if (gmapsName) draft.venue_guess = { name: gmapsName, type: "restaurant" };
   }
 
   // 4. Venue plausibility — a venue guess that matches nothing in the DB (or
@@ -154,7 +179,7 @@ export async function processSubmission(env: Env, id: string): Promise<void> {
     .update(submissions)
     .set({
       status: "pending_review",
-      raw_extraction: { ...draft },
+      raw_extraction: { ...(sub.raw_extraction?.gmaps ? { gmaps: sub.raw_extraction.gmaps } : {}), ...draft },
       confidence,
       phash,
       auto_flags: [...flags],

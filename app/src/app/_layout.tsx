@@ -3,6 +3,7 @@ import "../global.css";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { HeaderTitle } from "../components/HeaderTitle";
+import { ShareIntentRouter } from "../components/ShareIntentRouter";
 import { navColors, ThemeProvider, useTheme } from "../theme";
 
 // Chrome colors follow the resolved theme; the provider hydrates the pref
@@ -13,6 +14,7 @@ function ThemedShell() {
   return (
     <>
       <StatusBar style={colors.statusBar} />
+      <ShareIntentRouter />
       <Stack
         screenOptions={{
           headerStyle: { backgroundColor: colors.headerBg },
@@ -29,6 +31,7 @@ function ThemedShell() {
         <Stack.Screen name="profile" options={{ title: "Your profile" }} />
         <Stack.Screen name="coverage" options={{ title: "Coverage" }} />
         <Stack.Screen name="submit" options={{ title: "Submit a menu" }} />
+        <Stack.Screen name="import" options={{ title: "Import from Google Maps" }} />
         <Stack.Screen name="signin" options={{ title: "Sign in" }} />
         <Stack.Screen name="admin/index" options={{ title: "Review queue" }} />
         <Stack.Screen name="admin/review/[id]" options={{ title: "Review submission" }} />

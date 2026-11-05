@@ -1,5 +1,6 @@
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
+import { Link } from "expo-router";
 import { useEffect, useState } from "react";
 import { Image, Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { API_BASE, SOURCE_TYPES } from "../api";
@@ -305,6 +306,14 @@ function SubmitForm() {
       </Text>
 
       {modeTabs}
+
+      <Link href="/import" asChild>
+        <Pressable className="rounded-lg border border-emerald-700 p-3">
+          <Text className="text-center text-sm font-semibold text-emerald-700">
+            Or import from a Google Maps link
+          </Text>
+        </Pressable>
+      </Link>
 
       <View className="gap-1.5">
         <Text className="text-sm font-semibold text-neutral-800 dark:text-neutral-100">What are you submitting?</Text>

@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Laparku Maps Import",
+  "version": "1.0.0",
+  "description": "Send the Google Maps venue you're viewing to Laparku Menus for menu import.",
+  "permissions": ["activeTab", "contextMenus", "tabs"],
+  "action": {
+    "default_title": "Import this venue into Laparku"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "host_permissions": [
+    "*://*.google.com/maps/*",
+    "*://maps.app.goo.gl/*",
+    "*://maps.google.com/*",
+    "*://*.google.*/maps/*"
+  ]
+}

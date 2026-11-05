@@ -510,3 +510,64 @@ export async function submitScan(body: {
   if (!res.ok) throw await errorMessage(res, "scan submission failed");
   return res.json() as Promise<ScanSubmitResult>;
 }
+
+// --- Google Maps link import (POST /api/submissions/gmaps) -----------------
+
+export interface GmapsImportSummary {
+  place?: { name?: string; address?: string; lat?: number; lng?: number } | null;
+  provider?: string | null;
+  venue_candidates?: { id: string; name: string; distance_m: number }[];
+  venue_id?: string | null;
+  published?: number | null;
+  matched?: number | null;
+  photo_urls?: string[];
+}
+
+export interface SubmissionStatus {
+  id: string;
+  status: string;
+  source_type: string;
+  auto_flags: string[];
+  rejection_reason: string | null;
+  items_count: number;
+  photo_count: number;
+  gmaps?: GmapsImportSummary;
+}
+
+// POST /api/submissions/gmaps — file a Maps share link for import. The
+// worker resolves it immediately but all provider work runs in the queue;
+// poll getSubmission for the outcome.
+export async function importGmaps(url: string): Promise<{ submission_id: string }> {
+  const res = await fetch(`${API_BASE}/submissions/gmaps`, {
+    method: "POST",
+    headers: await sessionPostHeaders(),
+    body: JSON.stringify({ url }),
+    credentials: "include",
+  });
+  if (!res.ok) throw await errorMessage(res, "import failed");
+  return res.json() as Promise<{ submission_id: string }>;
+}
+
+// GET /api/submissions/:id — status poll (own submissions only).
+export async function getSubmission(id: string): Promise<SubmissionStatus> {
+  const res = await fetch(`${API_BASE}/submissions/${id}`, { credentials: "include" });
+  if (!res.ok) throw await errorMessage(res, "submission lookup failed");
+  return res.json() as Promise<SubmissionStatus>;
+}
+
+// POST /api/submissions/gmaps/:id/venue — confirm which venue a
+// structured-menu import belongs to (publishes from the cached payload) or
+// mark it as a new venue (stays in review).
+export async function attachGmapsVenue(
+  id: string,
+  body: { venue_id: string } | { new_venue: true },
+): Promise<{ status: string; published?: number; matched?: number }> {
+  const res = await fetch(`${API_BASE}/submissions/gmaps/${id}/venue`, {
+    method: "POST",
+    headers: await sessionPostHeaders(),
+    body: JSON.stringify(body),
+    credentials: "include",
+  });
+  if (!res.ok) throw await errorMessage(res, "venue attach failed");
+  return res.json() as Promise<{ status: string; published?: number; matched?: number }>;
+}

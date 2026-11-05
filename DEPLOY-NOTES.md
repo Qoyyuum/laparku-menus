@@ -41,6 +41,7 @@ npx wrangler pages deploy landing --project-name=laparku
 | `BETTER_AUTH_SECRET` | ✅ set (generated, 2× UUID) |
 | `TURNSTILE_SECRET_KEY` | ❌ not set — server-side Turnstile checks are skipped while unset |
 | `GRAVATAR_API_KEY` | ❌ not set — profiles skip verified-social lookups while unset (optional upstream; raises verified_accounts cap past 4) |
+| `SERPFAST_API_KEY` | ❌ not set — `serpfast` provider in the gmaps_link import chain is skipped while unset (fallback for the `browser` provider; get a key at serpfast.com) |
 
 `TURNSTILE_SITE_KEY` in `[vars]` is a placeholder (`TODO-create-turnstile-widget`).
 

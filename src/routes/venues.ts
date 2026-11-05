@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { getDb } from "../db/client";
@@ -6,6 +6,7 @@ import { AREAS, venues, VENUE_TYPES } from "../db/schema";
 import type { Env } from "../env";
 import { staleMonths, withFreshness } from "../lib/freshness";
 import { reverseNominatim, searchNominatim } from "../lib/osm";
+import { similarName, venuesNear } from "../lib/venue-match";
 import { requireAuth, type AuthVariables } from "../middleware/auth";
 import { rateLimit } from "../middleware/rate-limit";
 
@@ -21,30 +22,6 @@ const DEDUP_M = 50;
 // caps): at most this many new venue rows per user per UTC day, enforced
 // atomically inside the insert.
 const MAX_VENUES_PER_USER_PER_DAY = 10;
-const M_PER_DEG_LAT = 111_320;
-const EARTH_R_M = 6_371_000;
-const toRad = (deg: number) => (deg * Math.PI) / 180;
-
-function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const a =
-    Math.sin(toRad(lat2 - lat1) / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(toRad(lng2 - lng1) / 2) ** 2;
-  return 2 * EARTH_R_M * Math.asin(Math.sqrt(a));
-}
-
-// Loose name match for the proximity dedup: case/whitespace-insensitive
-// equality, or one name containing the other ("Kaizen" vs "Kaizen Sushi").
-// The containment arm only runs when the shorter name is ≥4 chars —
-// otherwise a one-word shared token ("Sushi", "A") would merge every
-// same-street shop into its neighbour.
-function similarName(a: string, b: string): boolean {
-  const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
-  const na = norm(a);
-  const nb = norm(b);
-  if (na === nb) return true;
-  const [shorter, longer] = na.length <= nb.length ? [na, nb] : [nb, na];
-  return shorter.length >= 4 && longer.includes(shorter);
-}
 
 // UTC day boundary — the same clock check-ins and verifications use for
 // their per-day caps, so all three agree on what "today" means.
@@ -141,30 +118,9 @@ venuesApi.post("/venues", rateLimit, requireAuth(WRITE_ROLES), async (c) => {
   }
 
   // Soft dedup: a published venue within ~50 m with a similar name is the
-  // same place — return it instead of creating a twin. Same bounding-box
-  // prefilter + haversine pattern as /venues/nearby.
-  const dLat = DEDUP_M / M_PER_DEG_LAT;
-  const dLng = Math.min(
-    180,
-    DEDUP_M / (M_PER_DEG_LAT * Math.max(Math.abs(Math.cos(toRad(lat))), 1e-6)),
-  );
-  const nearRows = await db
-    .select()
-    .from(venues)
-    .where(
-      and(
-        eq(venues.status, "published"),
-        isNotNull(venues.geo),
-        sql`json_valid(${venues.geo})`,
-        sql`CAST(json_extract(${venues.geo}, '$.lat') AS REAL) BETWEEN ${lat - dLat} AND ${lat + dLat}`,
-        sql`CAST(json_extract(${venues.geo}, '$.lng') AS REAL) BETWEEN ${lng - dLng} AND ${lng + dLng}`,
-      ),
-    );
-  const match = nearRows.find(
-    (v) =>
-      haversineM(lat, lng, Number(v.geo!.lat), Number(v.geo!.lng)) <= DEDUP_M &&
-      similarName(v.name, name),
-  );
+  // same place — return it instead of creating a twin.
+  const nearRows = await venuesNear(db, { lat, lng, radius_m: DEDUP_M });
+  const match = nearRows.find((c) => similarName(c.venue.name, name))?.venue;
   if (match) return c.json({ venue: withFreshness(match, months) }, 200);
 
   // The 10/user/day cap is enforced INSIDE the insert — a plain

@@ -19,6 +19,28 @@ export interface RawExtraction {
   venue_guess?: { name: string; type?: string; area?: string } | null;
   items?: unknown[];
   suspicion?: string[];
+  // Google Maps import payload — cached provider answer (place details,
+  // structured menu sections, photo URLs, venue-match candidates). Kept
+  // loose like the vision draft; src/lib/gmaps-provider.ts owns the shape.
+  gmaps?: {
+    resolved_url?: string;
+    place_id?: string;
+    data_id?: string;
+    provider?: string;
+    place?: {
+      name?: string;
+      address?: string;
+      lat?: number;
+      lng?: number;
+      categories?: string[];
+    };
+    sections?: { name: string; items: { name: string; price?: number; description?: string }[] }[];
+    photo_urls?: string[];
+    venue_candidates?: { id: string; name: string; distance_m: number }[];
+    venue_id?: string;
+    published?: number;
+    matched?: number;
+  };
   [key: string]: unknown;
 }
 
@@ -27,7 +49,7 @@ export const AREAS = ["Brunei-Muara", "Tutong", "Belait", "Temburong"] as const;
 export const HALAL_STATUSES = ["halal-certified", "muslim-owned", "non-halal", "unknown", "n-a"] as const;
 export const VENUE_VERIFICATIONS = ["unverified", "verified", "claimed-by-owner"] as const;
 export const ITEM_TYPES = ["dish", "product"] as const;
-export const SOURCE_TYPES = ["menu_pdf", "menu_photo", "product_photo", "barcode", "url", "manual_entry"] as const;
+export const SOURCE_TYPES = ["menu_pdf", "menu_photo", "product_photo", "barcode", "url", "manual_entry", "gmaps_link"] as const;
 export const SUBMISSION_STATUSES = [
   "pending",
   "pending_review",
@@ -95,6 +117,11 @@ export const venues = sqliteTable(
   // index (0005) is the atomic race backstop for that check-then-insert
   // (SQLite counts each NULL as distinct, so non-OSM rows coexist fine).
   osm_ref: text("osm_ref"),
+  // Google Maps provenance for venues created/matched via the gmaps_link
+  // import — the ChIJ place id. Same role as osm_ref: hard dedup key, and
+  // a re-import of the same place auto-matches this venue. The UNIQUE
+  // index (0007) is the atomic race backstop; NULLs coexist freely.
+  google_place_id: text("google_place_id"),
   // better-auth user id of the trusted-create caller (POST /api/venues) —
   // drives the per-user daily venue-create cap. Plain text, no drizzle
   // FK into the untracked "user" table (same convention as
@@ -103,7 +130,10 @@ export const venues = sqliteTable(
   created_at: createdAt(),
   updated_at: updatedAt(),
   },
-  (t) => [uniqueIndex("venues_osm_ref_idx").on(t.osm_ref)],
+  (t) => [
+    uniqueIndex("venues_osm_ref_idx").on(t.osm_ref),
+    uniqueIndex("venues_google_place_id_idx").on(t.google_place_id),
+  ],
 );
 
 export const submissions = sqliteTable(

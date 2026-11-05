@@ -38,4 +38,21 @@ export interface Env {
   // but raises the verified_accounts cap past 4; absent → socials refresh
   // skipped (see src/lib/gravatar.ts, src/routes/me.ts).
   GRAVATAR_API_KEY?: string;
+  // Cloudflare Browser Run binding ([browser] in wrangler.toml) — headless
+  // Chrome for the gmaps_link import provider chain. Absent in tests and
+  // in envs that don't declare it → the `browser` provider is skipped.
+  BROWSER?: Fetcher;
+  // GMaps import provider chain ([vars]): comma-separated provider names
+  // tried in order — "browser,serpfast" default; "stub" in tests.
+  GMAPS_PROVIDER?: string;
+  // Per-provider daily budgets ([vars]): browser session-seconds and
+  // serpfast calls. Defaults in src/lib/gmaps-provider.ts.
+  GMAPS_DAILY_BROWSER_SECONDS?: string;
+  SERPFAST_DAILY_CALL_CAP?: string;
+  // Daily cap on trusted-published import items (mirrors
+  // SCAN_DAILY_ITEM_CAP semantics in src/lib/gmaps-publish.ts).
+  GMAPS_DAILY_ITEM_CAP?: string;
+  // serpfast API key (`wrangler secret put SERPFAST_API_KEY`). Optional —
+  // absent → the `serpfast` provider is skipped by the chain.
+  SERPFAST_API_KEY?: string;
 }
