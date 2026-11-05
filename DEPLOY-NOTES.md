@@ -20,6 +20,7 @@ workers.dev subdomain **`bbdl`**. Wrangler 4.156.2 (project-local, via `npx`).
 | Pages project | `laparku` | production branch `main` |
 | Rate-limit binding | `RATE_LIMITER` | namespace_id `1001`, 10 req / 60s per key |
 | AI binding | `AI` | `[ai]` in wrangler.toml |
+| Vectorize index | `laparku-search` | 1024 dims, cosine; `SEARCH_INDEX` binding; metadata-indexed: kind, venue_id, venue_type, item_type, area, halal (string), price_bnd (number) |
 
 ## Commands run
 
@@ -32,6 +33,13 @@ npx wrangler d1 migrations apply laparku-menus-db --remote   # 0000_init, 0001_a
 npx wrangler deploy
 npx wrangler pages project create laparku --production-branch=main
 npx wrangler pages deploy landing --project-name=laparku
+
+# Semantic search — one-time index + metadata-index setup:
+npx wrangler vectorize create laparku-search --dimensions=1024 --metric=cosine
+for p in kind venue_id venue_type item_type area halal; do
+  npx wrangler vectorize create-metadata-index laparku-search --property-name=$p --type=string
+done
+npx wrangler vectorize create-metadata-index laparku-search --property-name=price_bnd --type=number
 ```
 
 ## Secrets
@@ -90,6 +98,20 @@ middleware with Durable-Object-backed counting.
 | `GET https://laparku.pages.dev/` | 200 |
 
 Empty result sets are expected — fresh database, no approved submissions yet.
+
+## Semantic search (Vectorize + Workers AI)
+
+`/api/search` embeds `q` with `@cf/baai/bge-m3` and recalls from the
+`laparku-search` Vectorize index when `SEARCH_PROVIDER=vectorize` (the
+`wrangler.toml` default). Post-deploy smoke:
+
+1. Create the index + metadata indexes (commands above) — once per env.
+2. Deploy, then run the one-time backfill:
+   `POST /api/admin/search/reindex` (reviewer session) → `{ok, items, venues}`.
+3. `GET /api/search?q=kangkong` — semantic hits return rows with `score`.
+4. Kill switch: `SEARCH_PROVIDER=like` in `[vars]` + redeploy restores
+   substring search. `wrangler dev` can't emulate the index — set
+   `SEARCH_PROVIDER=like` in `.dev.vars` for offline dev.
 
 ## Remaining manual steps (need the user)
 
