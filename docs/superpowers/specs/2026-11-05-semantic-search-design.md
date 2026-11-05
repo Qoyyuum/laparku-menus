@@ -1,7 +1,7 @@
 # Semantic search (Vectorize + Workers AI) — design
 
 **Date:** 2026-11-05
-**Status:** pending approval (brainstorm session → design)
+**Status:** approved
 
 ## Intent
 
