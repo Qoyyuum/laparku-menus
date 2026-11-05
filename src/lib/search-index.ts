@@ -1,3 +1,6 @@
+import { and, eq, inArray } from "drizzle-orm";
+import type { Db } from "../db/client";
+import { food_items, venues } from "../db/schema";
 import type { Env } from "../env";
 import type { FoodItem, Venue } from "../db/schema";
 
@@ -66,4 +69,105 @@ export function metadataFilter(
     if (f.maxPrice !== undefined) filter.price_bnd = { $lte: f.maxPrice };
   }
   return filter as VectorizeVectorMetadataFilter;
+}
+
+// bge-m3 accepts a text array per call; 50 keeps payloads comfortably small.
+const EMBED_CHUNK = 50;
+
+export async function embedTexts(env: Env, texts: string[]): Promise<number[][]> {
+  const model = env.EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL;
+  const vectors: number[][] = [];
+  for (let off = 0; off < texts.length; off += EMBED_CHUNK) {
+    const res = (await env.AI.run(model, { text: texts.slice(off, off + EMBED_CHUNK) })) as {
+      data: number[][];
+    };
+    vectors.push(...res.data);
+  }
+  return vectors;
+}
+
+// Index the live rows among `itemIds`. The status/is_current filter inside
+// the load means callers can pass ids blindly — rows that aren't public
+// simply don't produce vectors (unindex is the removal path).
+export async function indexItems(env: Env, db: Db, itemIds: string[]): Promise<void> {
+  if (!searchEnabled(env) || itemIds.length === 0) return;
+  const rows: { item: FoodItem; venue: Venue }[] = [];
+  for (let off = 0; off < itemIds.length; off += 90) {
+    rows.push(
+      ...(await db
+        .select({ item: food_items, venue: venues })
+        .from(food_items)
+        .innerJoin(venues, eq(food_items.venue_id, venues.id))
+        .where(
+          and(
+            inArray(food_items.id, itemIds.slice(off, off + 90)),
+            eq(food_items.status, "published"),
+            eq(food_items.is_current, true),
+            eq(venues.status, "published"),
+          ),
+        )),
+    );
+  }
+  if (rows.length === 0) return;
+  const vectors = await embedTexts(env, rows.map((r) => itemDoc(r.item, r.venue)));
+  await env.SEARCH_INDEX!.upsert(
+    rows.map((r, i) => ({
+      id: r.item.id,
+      values: vectors[i]!,
+      metadata: {
+        kind: "item",
+        venue_id: r.venue.id,
+        venue_type: r.venue.type,
+        item_type: r.item.item_type,
+        area: r.venue.area,
+        halal: r.venue.halal_status,
+        ...(r.item.price_bnd !== null ? { price_bnd: r.item.price_bnd } : {}),
+      },
+    })),
+  );
+}
+
+export async function indexVenues(env: Env, db: Db, venueIds: string[]): Promise<void> {
+  if (!searchEnabled(env) || venueIds.length === 0) return;
+  const rows: Venue[] = [];
+  for (let off = 0; off < venueIds.length; off += 90) {
+    rows.push(
+      ...(await db
+        .select()
+        .from(venues)
+        .where(and(inArray(venues.id, venueIds.slice(off, off + 90)), eq(venues.status, "published")))),
+    );
+  }
+  if (rows.length === 0) return;
+  const vectors = await embedTexts(env, rows.map(venueDoc));
+  await env.SEARCH_INDEX!.upsert(
+    rows.map((v, i) => ({
+      id: v.id,
+      values: vectors[i]!,
+      metadata: { kind: "venue", venue_type: v.type, area: v.area, halal: v.halal_status },
+    })),
+  );
+}
+
+export async function unindex(env: Env, ids: string[]): Promise<void> {
+  if (!searchEnabled(env) || ids.length === 0) return;
+  await env.SEARCH_INDEX!.deleteByIds(ids);
+}
+
+// Full rebuild — the one-time backfill after the index is created and the
+// repair path when vectors stale-date. Upserts are idempotent on id, so a
+// repeat run converges rather than duplicating.
+export async function reindexAll(env: Env, db: Db): Promise<{ items: number; venues: number }> {
+  const venueIds = (await db.select({ id: venues.id }).from(venues).where(eq(venues.status, "published"))).map(
+    (r) => r.id,
+  );
+  const itemIds = (
+    await db
+      .select({ id: food_items.id })
+      .from(food_items)
+      .where(and(eq(food_items.status, "published"), eq(food_items.is_current, true)))
+  ).map((r) => r.id);
+  await indexVenues(env, db, venueIds);
+  await indexItems(env, db, itemIds);
+  return { items: itemIds.length, venues: venueIds.length };
 }

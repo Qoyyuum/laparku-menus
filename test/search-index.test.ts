@@ -1,13 +1,24 @@
+import { env, SELF } from "cloudflare:test";
+import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
+import { getDb } from "../src/db/client";
+import { food_items, type FoodItem, type Venue } from "../src/db/schema";
 import type { Env } from "../src/env";
-import type { FoodItem, Venue } from "../src/db/schema";
 import {
+  embedTexts,
+  indexItems,
+  indexVenues,
   itemDoc,
   metadataFilter,
   minScore,
+  reindexAll,
   searchEnabled,
+  unindex,
   venueDoc,
 } from "../src/lib/search-index";
+import adminApi from "../src/routes/admin";
+import { forgeSession } from "./helpers/auth";
+import { seed } from "./helpers/seed";
 
 describe("search-index core", () => {
   it("itemDoc embeds bilingual name, description, tags and venue context", () => {
@@ -98,5 +109,152 @@ describe("search-index core", () => {
     expect(minScore({} as Env)).toBe(0.5);
     expect(minScore({ SEARCH_MIN_SCORE: "0.7" } as Env)).toBe(0.7);
     expect(minScore({ SEARCH_MIN_SCORE: "junk" } as Env)).toBe(0.5);
+  });
+});
+
+// Wrapped-env fakes: spread the real test env so getDb/DB stay live, swap in
+// a recording VectorizeIndex and a deterministic AI embedding stub.
+const fakeIndex = () => {
+  const calls = { upsert: [] as VectorizeVector[][], deleted: [] as string[][] };
+  return {
+    calls,
+    index: {
+      upsert: async (v: VectorizeVector[]) => {
+        calls.upsert.push(v);
+        return { ids: v.map((x) => x.id), count: v.length };
+      },
+      deleteByIds: async (ids: string[]) => {
+        calls.deleted.push(ids);
+        return { ids, count: ids.length };
+      },
+      query: async () => ({ matches: [], count: 0 }),
+    } as unknown as VectorizeIndex,
+  };
+};
+const fakeAi = {
+  run: async (_m: string, input: { text: string[] }) => ({
+    shape: [input.text.length, 3],
+    data: input.text.map((t) => [t.length, 1, 0.5]),
+  }),
+} as unknown as Ai;
+const semanticEnv = (fi: ReturnType<typeof fakeIndex>) =>
+  ({ ...env, SEARCH_PROVIDER: "vectorize", SEARCH_INDEX: fi.index, AI: fakeAi }) as Env;
+
+describe("indexing", () => {
+  it("embedTexts batches through Workers AI", async () => {
+    const texts = ["a", "bb", "ccc"];
+    const vectors = await embedTexts(
+      { ...env, AI: fakeAi, EMBEDDING_MODEL: "@cf/baai/bge-m3" } as Env,
+      texts,
+    );
+    expect(vectors).toHaveLength(3);
+    expect(vectors[0]).toEqual([1, 1, 0.5]);
+  });
+
+  it("indexItems embeds and upserts vectors with metadata", async () => {
+    const { venue } = await seed(env);
+    const db = getDb(env);
+    const [item] = await db
+      .select()
+      .from(food_items)
+      .where(eq(food_items.venue_id, venue.id))
+      .limit(1);
+    const fi = fakeIndex();
+    await indexItems(semanticEnv(fi), db, [item!.id]);
+    expect(fi.calls.upsert.flat().map((v) => v.id)).toEqual([item!.id]);
+    const meta = fi.calls.upsert.flat()[0]!.metadata!;
+    expect(meta).toMatchObject({
+      kind: "item",
+      venue_id: venue.id,
+      venue_type: venue.type,
+      area: venue.area,
+    });
+    expect(meta.price_bnd).toBe(1.5);
+  });
+
+  it("indexVenues upserts venue vectors", async () => {
+    const { venue } = await seed(env);
+    const fi = fakeIndex();
+    await indexVenues(semanticEnv(fi), getDb(env), [venue.id]);
+    const meta = fi.calls.upsert.flat()[0]!.metadata!;
+    expect(meta).toMatchObject({
+      kind: "venue",
+      venue_type: "restaurant",
+      area: "Brunei-Muara",
+      halal: "muslim-owned",
+    });
+    expect(meta.price_bnd).toBeUndefined();
+  });
+
+  it("indexItems no-ops when provider is like", async () => {
+    const fi = fakeIndex();
+    let aiCalled = false;
+    const w = {
+      ...env,
+      SEARCH_PROVIDER: "like",
+      SEARCH_INDEX: fi.index,
+      AI: {
+        run: async () => {
+          aiCalled = true;
+          return { data: [] };
+        },
+      } as unknown as Ai,
+    } as Env;
+    await indexItems(w, getDb(env), ["anything"]);
+    expect(aiCalled).toBe(false);
+    expect(fi.calls.upsert).toHaveLength(0);
+  });
+
+  it("unindex deletes ids; reindexAll covers live rows and skips hidden", async () => {
+    const { venue } = await seed(env);
+    const db = getDb(env);
+    const fi = fakeIndex();
+    const w = semanticEnv(fi);
+    await unindex(w, ["a", "b"]);
+    expect(fi.calls.deleted).toEqual([["a", "b"]]);
+    const counts = await reindexAll(w, db);
+    const upserted = fi.calls.upsert.flat();
+    expect(
+      upserted.every((v) => v.metadata?.kind === "item" || v.metadata?.kind === "venue"),
+    ).toBe(true);
+    expect(counts.venues).toBeGreaterThanOrEqual(1);
+    expect(counts.items).toBeGreaterThanOrEqual(1);
+    const [hidden] = await db
+      .insert(food_items)
+      .values({
+        venue_id: venue.id,
+        item_type: "dish",
+        name: "Ghost",
+        status: "hidden",
+        is_current: false,
+      })
+      .returning();
+    fi.calls.upsert.length = 0;
+    await reindexAll(w, db);
+    expect(fi.calls.upsert.flat().map((v) => v.id)).not.toContain(hidden!.id);
+  });
+});
+
+describe("POST /api/admin/search/reindex", () => {
+  it("requires a reviewer session", async () => {
+    const res = await SELF.fetch("https://x/api/admin/search/reindex", { method: "POST" });
+    expect(res.status).toBe(401);
+  });
+
+  it("reindexes and reports counts", async () => {
+    await seed(env);
+    const { cookie } = await forgeSession("reviewer");
+    const fi = fakeIndex();
+    const res = await adminApi.request(
+      "/search/reindex",
+      { method: "POST", headers: { cookie } },
+      semanticEnv(fi),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; items: number; venues: number };
+    expect(body.ok).toBe(true);
+    expect(body.venues).toBeGreaterThanOrEqual(1);
+    expect(body.items).toBeGreaterThanOrEqual(1);
+    expect(fi.calls.upsert.flat().length).toBeGreaterThanOrEqual(2);
   });
 });
