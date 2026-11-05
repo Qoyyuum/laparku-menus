@@ -55,4 +55,11 @@ export interface Env {
   // serpfast API key (`wrangler secret put SERPFAST_API_KEY`). Optional —
   // absent → the `serpfast` provider is skipped by the chain.
   SERPFAST_API_KEY?: string;
+  // Semantic search: [[vectorize]] binding + [vars]. Optional — absent or
+  // SEARCH_PROVIDER!="vectorize" → searchEnabled() is false and callers
+  // keep the LIKE path. See src/lib/search-index.ts.
+  SEARCH_INDEX?: VectorizeIndex;
+  EMBEDDING_MODEL?: string;
+  SEARCH_PROVIDER?: string;
+  SEARCH_MIN_SCORE?: string;
 }
