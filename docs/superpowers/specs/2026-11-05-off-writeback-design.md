@@ -124,7 +124,7 @@ Entry: `drainOffPush(env, { limit, dryRun })` → `{ scanned, queued }`.
 
 1. SELECT eligible food_items (criteria above) — barcode canonicalized
    via `normalizeBarcode`; invalid codes get an outbox row marked
-   `failed` ("invalid barcode") so they're not rescanned forever.
+   `skipped` ("invalid barcode") so they're not rescanned forever.
 2. Skip items whose `barcode_source` array intersects the OFF family
    (same set as product-lookup: openfoodfacts/openbeautyfacts/
    openpetfoodfacts/openproductsfacts).
@@ -228,7 +228,10 @@ reviewed nutrition reach OFF at all.
 - `wrangler secret put OFF_USER_ID`, `OFF_USER_PASSWORD` — a dedicated
   OFF account (username, not email).
 - Vars: `OFF_PUSH_BATCH` (default 25), `OFF_BASE_URL`
-  (default `https://world.openfoodfacts.org`).
+  (default `https://bn.openfoodfacts.org` — the Brunei country
+  subdomain; writes there infer `cc=bn`, so new products land on the
+  Brunei listing directly. The barcode probe is global regardless of
+  subdomain, so existing-product detection still sees the world DB).
 - **Testing:** `OFF_BASE_URL=https://world.openfoodfacts.net` is OFF's
   public staging server — real write round-trips without touching the
   production database (staging needs its own account credentials).
