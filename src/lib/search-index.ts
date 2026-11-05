@@ -157,6 +157,32 @@ export async function unindex(env: Env, ids: string[]): Promise<void> {
 // Full rebuild — the one-time backfill after the index is created and the
 // repair path when vectors stale-date. Upserts are idempotent on id, so a
 // repeat run converges rather than duplicating.
+// Ordered recall for one query: embed q once, run one Vectorize query per
+// kind (independent topKs), floor-filter, and return ids best-first with
+// scores. Callers hydrate rows from D1 — this never returns data itself.
+export async function semanticMatches(
+  env: Env,
+  q: string,
+  f: SemanticFilters,
+): Promise<{ items: { id: string; score: number }[]; venues: { id: string; score: number }[] }> {
+  const [vec] = await embedTexts(env, [q.trim()]);
+  const floor = minScore(env);
+  const recall = async (kind: "item" | "venue", topK: number) => {
+    const res = await env.SEARCH_INDEX!.query(vec!, {
+      topK,
+      filter: metadataFilter(kind, f),
+      returnMetadata: "none",
+    });
+    // Same id can recur in a match list (stale duplicate vectors); keep the
+    // first — the highest score — so hydration emits each row once.
+    const seen = new Set<string>();
+    return res.matches
+      .filter((m) => m.score >= floor)
+      .flatMap((m) => (seen.has(m.id) ? [] : (seen.add(m.id), [{ id: m.id, score: m.score }])));
+  };
+  return { items: await recall("item", 50), venues: await recall("venue", 20) };
+}
+
 export async function reindexAll(env: Env, db: Db): Promise<{ items: number; venues: number }> {
   const venueIds = (await db.select({ id: venues.id }).from(venues).where(eq(venues.status, "published"))).map(
     (r) => r.id,

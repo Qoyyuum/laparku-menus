@@ -5,6 +5,7 @@ import { AREAS, food_items, HALAL_STATUSES, ITEM_TYPES, venues, VENUE_TYPES, typ
 import type { Env } from "../env";
 import { staleMonths, withFreshness } from "../lib/freshness";
 import { preferredHandle } from "../lib/gravatar";
+import { searchEnabled, semanticMatches } from "../lib/search-index";
 
 // Cap rows returned by a single public request.
 const LIMIT = 100;
@@ -149,6 +150,86 @@ export interface PublicSearchFilters {
 
 export async function searchPublic(env: Env, f: PublicSearchFilters) {
   const db = getDb(env);
+
+  // Semantic branch (src/lib/search-index.ts): embed q → Vectorize recall →
+  // hydrate rows by id through the SAME condition builders as the LIKE path
+  // (metadata narrows recall, D1 decides truth) → emit in score order.
+  // Any failure (AI, index) logs and falls through to LIKE — search never
+  // 500s on the index.
+  const q = f.q?.trim();
+  if (q && searchEnabled(env)) {
+    try {
+      const recall = await semanticMatches(env, q, {
+        area: f.area,
+        halal: f.halal,
+        itemType: f.itemType,
+        venueType: f.venueType,
+        maxPrice: f.maxPrice,
+      });
+
+      const venueIds = recall.venues.map((r) => r.id);
+      const venueById = new Map(
+        venueIds.length === 0
+          ? []
+          : (
+              await db
+                .select()
+                .from(venues)
+                .where(
+                  and(
+                    ...venueConds({ type: f.venueType, area: f.area, halal: f.halal }),
+                    inArray(venues.id, venueIds),
+                  ),
+                )
+                .limit(LIMIT)
+            ).map((v) => [v.id, v] as const),
+      );
+
+      const itemIds = recall.items.map((r) => r.id);
+      let itemRows: FoodItem[] = [];
+      if (itemIds.length > 0) {
+        const iConds: SQL[] = [
+          eq(food_items.status, "published"),
+          eq(food_items.is_current, true),
+          ...venueConds({ type: f.venueType, area: f.area, halal: f.halal }),
+          inArray(food_items.id, itemIds),
+        ];
+        if (f.itemType) iConds.push(eq(food_items.item_type, f.itemType));
+        if (f.tag) {
+          iConds.push(
+            sql`EXISTS (SELECT 1 FROM json_each(${food_items.tags}) AS je WHERE je.value = ${f.tag})`,
+          );
+        }
+        if (f.maxPrice !== undefined) iConds.push(lte(food_items.price_bnd, f.maxPrice));
+        itemRows = (
+          await db
+            .select({ item: food_items })
+            .from(food_items)
+            .innerJoin(venues, eq(food_items.venue_id, venues.id))
+            .where(and(...iConds))
+            .limit(LIMIT)
+        ).map((r) => r.item);
+      }
+      const itemById = new Map(itemRows.map((i) => [i.id, i]));
+
+      const months = staleMonths(env);
+      return {
+        venues: recall.venues.flatMap((r) => {
+          const v = venueById.get(r.id);
+          return v ? [withFreshness({ ...v, score: r.score }, months)] : [];
+        }),
+        items: await withContribCredit(
+          db,
+          recall.items.flatMap((r) => {
+            const i = itemById.get(r.id);
+            return i ? [{ ...i, score: r.score }] : [];
+          }),
+        ),
+      };
+    } catch (e) {
+      console.error("semantic search failed, falling back to LIKE", e);
+    }
+  }
 
   // Venues half: published venues matching venue-level filters + q on names.
   const vConds = venueConds({ type: f.venueType, area: f.area, halal: f.halal });

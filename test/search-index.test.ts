@@ -17,6 +17,7 @@ import {
   venueDoc,
 } from "../src/lib/search-index";
 import adminApi from "../src/routes/admin";
+import { searchPublic } from "../src/routes/public";
 import { forgeSession } from "./helpers/auth";
 import { seed } from "./helpers/seed";
 
@@ -256,5 +257,106 @@ describe("POST /api/admin/search/reindex", () => {
     expect(body.venues).toBeGreaterThanOrEqual(1);
     expect(body.items).toBeGreaterThanOrEqual(1);
     expect(fi.calls.upsert.flat().length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+// Canned-recall env: the fake index returns `matches[kind]` for whatever
+// vector it's queried with — exercises hydration/floor/fallback, not the
+// embedding itself.
+const recallEnv = (matches: Record<string, { id: string; score: number }[]>) => {
+  const index = {
+    query: async (_v: number[], o: { filter?: Record<string, unknown>; topK?: number }) => ({
+      matches: matches[String((o.filter as { kind: string }).kind)] ?? [],
+      count: 0,
+    }),
+    upsert: async () => ({ ids: [], count: 0 }),
+    deleteByIds: async () => ({ ids: [], count: 0 }),
+  } as unknown as VectorizeIndex;
+  return { ...env, SEARCH_PROVIDER: "vectorize", SEARCH_INDEX: index, AI: fakeAi } as Env;
+};
+
+describe("semantic searchPublic", () => {
+  it("hydrates D1 rows ordered by score", async () => {
+    const { venue } = await seed(env);
+    const db = getDb(env);
+    const extra = await db
+      .insert(food_items)
+      .values([
+        { venue_id: venue.id, item_type: "dish", name: "Kangkong Belacan", price_bnd: 3 },
+        { venue_id: venue.id, item_type: "dish", name: "Ambuyat", price_bnd: 5 },
+      ])
+      .returning();
+    const [nasik, kangkong, ambuyat] = [
+      (await db.select().from(food_items).where(eq(food_items.name, "Nasi Katok")).limit(1))[0]!,
+      extra[0]!,
+      extra[1]!,
+    ];
+    const w = recallEnv({
+      item: [
+        { id: ambuyat.id, score: 0.9 },
+        { id: nasik.id, score: 0.8 },
+        { id: kangkong.id, score: 0.7 },
+      ],
+    });
+    const r = await searchPublic(w, { q: "spicy rice" });
+    expect(r.items.map((i) => i.id)).toEqual([ambuyat.id, nasik.id, kangkong.id]);
+    expect((r.items[0] as { score?: number }).score).toBe(0.9);
+  });
+
+  it("score floor drops low-confidence matches; stale rows never leak", async () => {
+    const { venue } = await seed(env);
+    const db = getDb(env);
+    const [live] = await db
+      .select()
+      .from(food_items)
+      .where(eq(food_items.name, "Nasi Katok"))
+      .limit(1);
+    const [ghost] = await db
+      .insert(food_items)
+      .values({ venue_id: venue.id, item_type: "dish", name: "Ghost", status: "hidden", is_current: false })
+      .returning();
+    const w = recallEnv({
+      item: [
+        { id: live!.id, score: 0.9 },
+        { id: ghost!.id, score: 0.95 },
+        { id: live!.id, score: 0.3 },
+      ],
+    });
+    const r = await searchPublic(w, { q: "anything" });
+    const ids = r.items.map((i) => i.id);
+    expect(ids).toEqual([live!.id]); // hidden row recalled but filtered; dup below floor dropped
+  });
+
+  it("whitespace q uses the browse path — no embedding call", async () => {
+    let called = false;
+    const w = {
+      ...recallEnv({}),
+      AI: {
+        run: async () => {
+          called = true;
+          return { data: [] };
+        },
+      } as unknown as Ai,
+    } as Env;
+    await searchPublic(w, { q: "   " });
+    expect(called).toBe(false);
+  });
+
+  it("recall failure falls back to LIKE", async () => {
+    await seed(env);
+    const w = {
+      ...env,
+      SEARCH_PROVIDER: "vectorize",
+      AI: fakeAi,
+      SEARCH_INDEX: {
+        query: async () => {
+          throw new Error("index down");
+        },
+        upsert: async () => ({ ids: [], count: 0 }),
+        deleteByIds: async () => ({ ids: [], count: 0 }),
+      } as unknown as VectorizeIndex,
+    } as Env;
+    const r = await searchPublic(w, { q: "katok" });
+    expect(r.items.map((i) => i.name)).toContain("Nasi Katok"); // LIKE path still found it
   });
 });
