@@ -42,12 +42,12 @@ const MENU_DRAFT: ExtractionDraft = {
   suspicion: [],
 };
 
-async function seedSubmission(image: Uint8Array | null = MENU_PNG, sourceType: (typeof SOURCE_TYPES)[number] = "menu_photo"): Promise<string> {
+async function seedSubmission(image: Uint8Array | null = MENU_PNG, sourceType: (typeof SOURCE_TYPES)[number] = "menu_photo", mime = "image/png"): Promise<string> {
   const id = crypto.randomUUID();
   const keys: string[] = [];
   if (image) {
     const key = `submissions/${id}/0`;
-    await env.SUBMISSIONS.put(key, image, { httpMetadata: { contentType: "image/png" } });
+    await env.SUBMISSIONS.put(key, image, { httpMetadata: { contentType: mime } });
     keys.push(key);
   }
   await getDb(env)
@@ -207,6 +207,25 @@ it("submission with no images (manual_entry/url) → pending_review without extr
     return MENU_DRAFT;
   });
   const id = await seedSubmission(null, "manual_entry");
+  await processSubmission(stubEnv(), id);
+
+  const row = await getRow(id);
+  expect(row?.status).toBe("pending_review");
+  expect(extractorCalls).toBe(0);
+});
+
+// A menu_pdf submission stores real files, but none of them are raster — the
+// vision model has nothing to see, so the row must reach reviewers like the
+// file-less path (they open the stored PDF via /api/admin/images/*) instead
+// of feeding the model an empty prompt and eating an auto-reject.
+it("PDF-only submission → pending_review without extraction", async () => {
+  let extractorCalls = 0;
+  setStubExtractor(() => {
+    extractorCalls++;
+    return NO_FOOD_DRAFT; // would auto_reject if reached — proves it's skipped
+  });
+  const PDF = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37, 0x0a]);
+  const id = await seedSubmission(PDF, "menu_pdf", "application/pdf");
   await processSubmission(stubEnv(), id);
 
   const row = await getRow(id);

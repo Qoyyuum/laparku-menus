@@ -54,9 +54,14 @@ export async function processSubmission(env: Env, id: string): Promise<void> {
     });
   }
 
-  // Nothing to inspect or extract — manual_entry text (items already sit in
-  // raw_extraction) or file-less url submissions go straight to reviewers.
-  if (images.length === 0) {
+  // Only raster files give the vision model something to see. Manual_entry
+  // text (items already sit in raw_extraction), file-less url submissions,
+  // and submissions whose stored files are all non-raster (e.g. a PDF-only
+  // menu) go straight to reviewers — feeding the model an empty prompt
+  // would auto-reject a submission a human could still review via
+  // /api/admin/images/*.
+  const rasterImages = images.filter((i) => i.mime.startsWith("image/"));
+  if (rasterImages.length === 0) {
     await db
       .update(submissions)
       .set({ status: "pending_review", auto_flags: [...flags] })
@@ -66,7 +71,7 @@ export async function processSubmission(env: Env, id: string): Promise<void> {
 
   // 1. Metadata forensics — conclusive generator signatures auto-reject
   //    before a cent is spent on the vision model.
-  for (const image of images) {
+  for (const image of rasterImages) {
     const { generatorSignature } = inspectImageMetadata(new Uint8Array(image.bytes));
     if (generatorSignature) {
       flags.add("generator_signature");
@@ -85,7 +90,7 @@ export async function processSubmission(env: Env, id: string): Promise<void> {
   // 2. pHash dedup against existing submissions. Undecodable files (PDFs)
   //    simply have no hash — never penalized for that.
   const phashes: string[] = [];
-  for (const image of images) {
+  for (const image of rasterImages) {
     if (!image.mime.startsWith("image/")) continue;
     try {
       phashes.push(await computePHash(new Uint8Array(image.bytes)));
@@ -106,7 +111,7 @@ export async function processSubmission(env: Env, id: string): Promise<void> {
   }
 
   // 3. Vision-model extraction — doubles as the content filter.
-  const draft = await extractContent(images, env);
+  const draft = await extractContent(rasterImages, env);
   for (const tag of draft.suspicion ?? []) {
     flags.add(KNOWN_SUSPICION_FLAGS.has(tag) ? tag : "extractor_suspicion");
   }
